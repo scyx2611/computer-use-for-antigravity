@@ -14,9 +14,23 @@ internal sealed class TargetDescriptor
 
     public string? AutomationId { get; init; }
 
+    public string? Css { get; init; }
+
+    public string? TestId { get; init; }
+
+    public string? Text { get; init; }
+
+    public string? Placeholder { get; init; }
+
     public CoordinateTarget? Coordinates { get; init; }
 
-    public bool HasSelector => Name is not null || Role is not null || AutomationId is not null;
+    public bool HasSelector => Name is not null
+        || Role is not null
+        || AutomationId is not null
+        || Css is not null
+        || TestId is not null
+        || Text is not null
+        || Placeholder is not null;
 
     public static TargetDescriptor FromAction(JsonObject action)
     {
@@ -28,6 +42,9 @@ internal sealed class TargetDescriptor
             Name = ReadOptionalString(action["name"]),
             Role = ReadOptionalString(action["role"]),
             AutomationId = ReadOptionalString(action["automation_id"]),
+            Css = ReadOptionalString(action["css"]),
+            TestId = ReadOptionalString(action["test_id"]),
+            Placeholder = ReadOptionalString(action["placeholder"]),
             Coordinates = ReadCoordinates(action, actionSpace)
         };
 
@@ -39,6 +56,10 @@ internal sealed class TargetDescriptor
                 Name = targetName,
                 Role = descriptor.Role,
                 AutomationId = descriptor.AutomationId,
+                Css = descriptor.Css,
+                TestId = descriptor.TestId,
+                Text = descriptor.Text,
+                Placeholder = descriptor.Placeholder,
                 Coordinates = descriptor.Coordinates
             };
         }
@@ -52,6 +73,10 @@ internal sealed class TargetDescriptor
                 Name = ReadOptionalString(targetObject["name"]) ?? descriptor.Name,
                 Role = ReadOptionalString(targetObject["role"]) ?? descriptor.Role,
                 AutomationId = ReadOptionalString(targetObject["automation_id"]) ?? descriptor.AutomationId,
+                Css = ReadOptionalString(targetObject["css"]) ?? descriptor.Css,
+                TestId = ReadOptionalString(targetObject["test_id"]) ?? descriptor.TestId,
+                Text = ReadOptionalString(targetObject["text"]) ?? descriptor.Text,
+                Placeholder = ReadOptionalString(targetObject["placeholder"]) ?? descriptor.Placeholder,
                 Coordinates = ReadCoordinates(targetObject, targetSpace)
                     ?? descriptor.Coordinates?.WithSpace(targetSpace)
             };
@@ -86,6 +111,26 @@ internal sealed class TargetDescriptor
         if (AutomationId is not null)
         {
             parts.Add($"automation_id='{AutomationId}'");
+        }
+
+        if (Css is not null)
+        {
+            parts.Add($"css='{Css}'");
+        }
+
+        if (TestId is not null)
+        {
+            parts.Add($"test_id='{TestId}'");
+        }
+
+        if (Text is not null)
+        {
+            parts.Add($"text='{Text}'");
+        }
+
+        if (Placeholder is not null)
+        {
+            parts.Add($"placeholder='{Placeholder}'");
         }
 
         return parts.Count == 0 ? "target" : string.Join(", ", parts);

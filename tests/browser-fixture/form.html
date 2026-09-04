@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Computer Use form fixture</title>
+    <style>
+      body { font: 16px sans-serif; margin: 40px; }
+      main { max-width: 520px; }
+      label, input, button { display: block; margin: 10px 0; }
+      input { padding: 8px; width: 280px; }
+      button { padding: 8px 16px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Computer Use form fixture</h1>
+      <form id="form" action="/success.html" method="get">
+        <label for="name">Name</label>
+        <input id="name" name="name" data-testid="name-field" placeholder="Enter your name" autocomplete="off">
+        <label for="email">Email</label>
+        <input id="email" name="email" data-testid="email-field" placeholder="Enter your email" autocomplete="off">
+        <label><input id="terms" name="terms" type="checkbox">Accept terms</label>
+        <button id="submit" data-testid="submit-button" type="submit">Submit</button>
+      </form>
+    </main>
+  </body>
+</html>

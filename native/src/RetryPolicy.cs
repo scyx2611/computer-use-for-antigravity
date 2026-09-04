@@ -57,6 +57,8 @@ internal sealed class RetryPolicy
             "ELEMENT_NOT_FOUND" => true,
             "UIA_UNAVAILABLE" => true,
             "AMBIGUOUS_TARGET" => true,
+            "STALE_BROWSER_STATE" => true,
+            "BROWSER_FRAME_DETACHED" => true,
             "ELEMENT_DISABLED" => HasElementEnabledExpectation(action),
             _ => false
         };

@@ -13,14 +13,16 @@ fragile desktop interaction into a deterministic runtime:
 
 ```text
 Antigravity -> MCP stdio -> TypeScript bridge -> JSONL -> persistent .NET runtime
-                                                       -> UI Automation / SendInput
-                                                       -> WGC -> PrintWindow -> BitBlt
+                                                       -> Interaction Router
+                                                       -> Desktop: UI Automation / SendInput
+                                                       -> Desktop capture: WGC -> PrintWindow -> BitBlt
+                                                       -> Managed Browser: CDP / Accessibility
 ```
 
-## Status: v0.3 — Reliable Workflow Execution
+## Status: v0.4 Phase 2 — Semantic Browser Actions
 
-This release keeps the existing six MCP tools and builds reliable workflow
-execution on top of the v0.2 capture and targeting guarantees:
+This phase keeps the existing six MCP tools and extends the browser-aware
+runtime foundation from managed launch/observe to deterministic browser input:
 
 - Windows Graphics Capture is the primary screenshot backend.
 - Capture falls back in order to `PrintWindow`, then `BitBlt`.
@@ -48,6 +50,32 @@ execution on top of the v0.2 capture and targeting guarantees:
 - Workflow failures preserve stable error codes and include the failed step,
   attempt, action-executed flag, last observation summary, verification, and
   trace.
+- `computer_launch` accepts `browser: { "mode": "managed", "profile":
+  "ephemeral" }` for Chrome or Edge. The runtime creates a private profile,
+  starts a local CDP endpoint, and returns a managed browser session.
+- `computer_observe` routes only runtime-managed browser windows to restricted
+  CDP. It returns page metadata, a compact Accessibility-derived element list,
+  tab metadata, and a `cdp_page_capture` screenshot.
+- An ordinary Chrome or Edge window is never auto-attached. It remains on the
+  desktop/UIA path and is marked `browser_detected` with
+  `browser_semantic_available: false`.
+- Managed browser `computer_act` and `computer_perform` support browser-native
+  `click`, `type_text`, `set_value`, `press_key`/`hotkey`, `scroll`, and
+  `navigate` through a restricted CDP command allowlist. They never fall back
+  to guessed coordinates or Windows `SendInput`.
+- Browser selectors support state-bound `element_id`, explicit `css` or
+  `test_id`, exact role/name, placeholder, visible text, and bounded
+  case-insensitive/contains/fuzzy matching. Multiple plausible matches fail
+  closed with `AMBIGUOUS_TARGET`.
+- Browser state is bound to the managed session, page target, document
+  generation, semantic signature, and private CDP node handles. Navigation or
+  document replacement invalidates old browser state; `computer_act` reports
+  `STALE_BROWSER_STATE`, while `computer_perform` re-observes within its
+  bounded recovery loop.
+- The CDP transport exposes only fixed DOM/query, focus/scroll, mouse/key
+  input, text insertion, navigation, and observation commands. It does not
+  expose arbitrary CDP, `Runtime.evaluate`, cookies, storage, passwords, or the
+  user's default browser profile.
 
 The runtime intentionally does not elevate itself. Actions against an elevated
 target return `TARGET_ELEVATED` when the target token can be inspected.
@@ -98,6 +126,13 @@ dist/native/ComputerUse.Native.exe
 mcp/dist/index.js
 ```
 
+For v0.4 Phase 2, publish to a separate directory so an installed v0.3 runtime
+is not replaced while host acceptance remains a separate gate:
+
+```powershell
+dotnet publish .\native\ComputerUse.Native.csproj -c Release -r win-x64 --self-contained false -o .\dist\native-v0.4-phase2
+```
+
 ## Windows smoke test
 
 After publishing, run the controlled Notepad end-to-end check:
@@ -114,6 +149,27 @@ that Antigravity has reloaded the global plugin.
 
 For the repeatable real-host checklist, see
 [`docs/host-acceptance.md`](./docs/host-acceptance.md).
+
+## Managed browser Phase 2 smoke test
+
+The observation script remains available, and the Phase 2 integration script
+also launches only its own isolated Chrome or Edge profile. It checks semantic
+input, navigation, state invalidation, ambiguity handling, and workflow
+execution. It does not attach to or close an existing browser profile:
+
+```powershell
+.\scripts\browser-spike-test.ps1 -Browser chrome
+.\scripts\browser-spike-test.ps1 -Browser edge
+.\scripts\browser-action-test.ps1 -Browser chrome
+.\scripts\browser-action-test.ps1 -Browser edge
+```
+
+The observation script expects the spike publish output at
+`dist/native-v0.4-spike/ComputerUse.Native.exe`. Pass `-NativePath` to use a
+different build. The action script expects
+`dist/native-v0.4-phase2/ComputerUse.Native.exe`; pass `-NativePath` to use a
+different build. These are native integration checks, not proof that
+Antigravity has loaded the branch's plugin.
 
 ## Install globally
 
@@ -172,6 +228,44 @@ The public tools are:
 resolves them deterministically, refuses ambiguous matches, and re-observes
 between actions.
 
+To launch a managed browser for Phase 2:
+
+    {
+      "path": "chrome.exe",
+      "browser": { "mode": "managed", "profile": "ephemeral" },
+      "args": ["http://127.0.0.1:8080/"]
+    }
+
+Use the returned `window.id` with `computer_observe`. The browser observation
+reports `interaction.backend: "browser_cdp"`,
+`capture.backend: "cdp_page_capture"`, `browser.session_id`, `target_id`,
+page URL/title, viewport, tabs, and compact semantic elements. Only `http`,
+`https`, and `about:blank` initial URLs are accepted.
+
+Managed browser actions use semantic targets from the latest observation:
+
+    {
+      "type": "set_value",
+      "target": { "test_id": "email-field" },
+      "value": "alice@example.test"
+    }
+
+    {
+      "type": "click",
+      "target": { "name": "Continue", "role": "link" }
+    }
+
+    {
+      "type": "navigate",
+      "url": "http://127.0.0.1:8080/form.html"
+    }
+
+`computer_act` requires the current browser `state_id`. A navigation or
+document replacement makes the previous state invalid and must be followed by
+`computer_observe`. `computer_perform` owns a bounded observe/resolve cycle for
+ordinary browser stale-state recovery. Browser postconditions beyond the
+existing deterministic UI/state checks are not a Phase 2 feature.
+
 A workflow action can verify its result without image recognition or an LLM:
 
     {
@@ -213,7 +307,7 @@ element_disabled, value, window_title_contains, ui_changed, and ui_stable.
 The result's execution_trace is intentionally compact and does not duplicate
 the full UI tree for every attempt.
 
-## v0.3 limitations
+## v0.4 Phase 2 limitations
 
 Windows Graphics Capture is best-effort. It can be unavailable on unsupported
 Windows/graphics environments, protected surfaces, minimized windows, remote
@@ -221,11 +315,19 @@ sessions, or some GPU applications; the response exposes the failure and
 fallback path. The WGC implementation uses the Windows SDK Direct3D 11
 interop path and currently reads back BGRA8 frames synchronously.
 
-This release does not add Browser/CDP, OCR, a policy engine, new MCP tools,
-LLM planning, or macOS/Linux support. Multi-monitor edge cases, richer
-drag/scroll postconditions, and additional capture optimizations remain future
-work. TARGET_ELEVATED host acceptance remains unverified unless a safe
-elevated GUI fixture is actually available.
+Browser support is currently limited to managed Google Chrome and Microsoft
+Edge with the Phase 2 semantic actions listed above. Full browser postcondition
+semantics, tab lifecycle, iframe/OOPIF routing, popup management, shadow-DOM
+handling, and complete lifecycle tracking are future milestones. Browser
+screenshots fall back to the existing desktop capture chain only when a managed
+window is available; semantic browser actions never fall back to guessed
+coordinates. Browser Host acceptance remains unverified until a real
+Antigravity Agent task invokes this build; `TARGET_ELEVATED` remains unverified
+unless a safe elevated GUI fixture is actually available.
+
+Phase 2 does not add OCR, a policy engine, new MCP tools, LLM planning,
+Playwright, arbitrary CDP/JavaScript, cookie or storage access, or macOS/Linux
+support.
 
 The WGC API flow follows Microsoft's [Windows Graphics Capture
 documentation](https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture),

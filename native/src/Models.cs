@@ -99,6 +99,38 @@ internal sealed class UiElementSnapshot
     [JsonPropertyName("value")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Value { get; init; }
+
+    [JsonPropertyName("source")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Source { get; init; }
+
+    [JsonPropertyName("text")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Text { get; init; }
+
+    [JsonPropertyName("enabled")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Enabled { get; init; }
+
+    [JsonPropertyName("checked")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Checked { get; init; }
+
+    [JsonPropertyName("selected")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Selected { get; init; }
+
+    [JsonPropertyName("placeholder")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Placeholder { get; init; }
+
+    [JsonPropertyName("test_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TestId { get; init; }
+
+    [JsonPropertyName("is_focused")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsFocused { get; init; }
 }
 
 internal sealed class ObserveResult
@@ -108,6 +140,13 @@ internal sealed class ObserveResult
 
     [JsonPropertyName("window")]
     public WindowSnapshot Window { get; init; } = new();
+
+    [JsonPropertyName("interaction")]
+    public InteractionInfo Interaction { get; init; } = new();
+
+    [JsonPropertyName("browser")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BrowserInfo? Browser { get; init; }
 
     [JsonPropertyName("elements")]
     public IReadOnlyList<UiElementSnapshot> Elements { get; init; } = [];
@@ -199,6 +238,13 @@ internal sealed class PerformResult
     [JsonPropertyName("window")]
     public WindowSnapshot Window { get; init; } = new();
 
+    [JsonPropertyName("interaction")]
+    public InteractionInfo Interaction { get; init; } = new();
+
+    [JsonPropertyName("browser")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BrowserInfo? Browser { get; init; }
+
     [JsonPropertyName("actions")]
     public IReadOnlyList<ActionRecord> Actions { get; init; } = [];
 
@@ -268,4 +314,11 @@ internal sealed class WindowState
     public string? ScreenshotHash { get; init; }
 
     public IReadOnlyList<UiElementSnapshot> Elements { get; init; } = [];
+
+    /// <summary>
+    /// Browser-only state identity and private CDP handles. This is never
+    /// serialized as part of an observation; backend node ids must not become
+    /// a public MCP contract.
+    /// </summary>
+    public BrowserStateMetadata? Browser { get; init; }
 }

@@ -213,6 +213,10 @@ const targetSelectorSchema = z
     name: z.string().optional(),
     role: z.string().optional(),
     automation_id: z.string().optional(),
+    css: z.string().min(1).max(512).optional(),
+    test_id: z.string().min(1).optional(),
+    text: z.string().optional(),
+    placeholder: z.string().optional(),
     x: z.number().optional(),
     y: z.number().optional(),
     coordinate_space: coordinateSpaceSchema.optional(),
@@ -267,6 +271,7 @@ const actionSchema = z
       "scroll",
       "drag",
       "wait",
+      "navigate",
     ]),
     element_id: z.number().int().optional(),
     target: z.union([targetSelectorSchema, z.string()]).optional(),
@@ -278,6 +283,10 @@ const actionSchema = z
     coordinate_space: coordinateSpaceSchema.optional(),
     text: z.string().optional(),
     value: z.string().optional(),
+    url: z.string().optional(),
+    css: z.string().min(1).max(512).optional(),
+    test_id: z.string().min(1).optional(),
+    placeholder: z.string().optional(),
     key: z.string().optional(),
     modifiers: z.array(z.string()).optional(),
     amount: z.number().int().optional(),
@@ -319,6 +328,12 @@ const waitSchema = z.object({
 const launchSchema = z.object({
   path: z.string().min(1),
   args: z.union([z.string(), z.array(z.string())]).optional(),
+  browser: z
+    .object({
+      mode: z.literal("managed"),
+      profile: z.literal("ephemeral").optional(),
+    })
+    .optional(),
   working_directory: z.string().min(1).optional(),
   wait_for_window: z.boolean().optional(),
   title_contains: z.string().min(1).optional(),
@@ -399,7 +414,7 @@ async function callTool(
 }
 
 function createServer(): McpServer {
-  const server = new McpServer({ name: "computer-use", version: "0.3.0" });
+  const server = new McpServer({ name: "computer-use", version: "0.4.0-phase2" });
 
   server.registerTool(
     "computer_list_windows",
@@ -416,7 +431,7 @@ function createServer(): McpServer {
     {
       title: "Observe Window",
       description:
-        "Capture a Windows application window as a screenshot plus a semantic UI Automation element tree. The response reports the capture backend, fallback diagnostics, and that screenshot coordinates are window-relative while UI Automation bounds are screen-relative. Use this before element-id actions.",
+        "Capture a Windows application window as a screenshot plus semantic elements. Managed Chrome and Edge windows use a restricted CDP page screenshot and Accessibility tree; ordinary windows use UI Automation. The response reports backend and coordinate diagnostics. Use this before element-id actions.",
       inputSchema: observeSchema,
     },
     async (args) => callTool("observe", args, true),
@@ -427,7 +442,7 @@ function createServer(): McpServer {
     {
       title: "Act on Window",
       description:
-        "Execute one UI action against a recent computer_observe state. Element ids are state-bound and fail safely with STALE_STATE when the UI changed; ambiguous semantic selectors fail with AMBIGUOUS_TARGET and candidates instead of guessing. Coordinate targets support screen, window, and normalized spaces.",
+        "Execute one UI action against a recent computer_observe state. Managed Chrome and Edge use restricted CDP semantic actions (click, type_text, set_value, press_key, hotkey, scroll, navigate); element ids remain document-bound and stale or ambiguous targets fail closed. Desktop actions continue to use UI Automation and SendInput.",
       inputSchema: actSchema,
     },
     async (args) => callTool("act", args),
@@ -438,7 +453,7 @@ function createServer(): McpServer {
     {
       title: "Perform Actions",
       description:
-        "Execute a bounded workflow with deterministic postconditions, retry/re-observe recovery, automatic stale-state recovery, and a compact execution trace. Semantic ambiguity fails closed; coordinate targets support screen, window, and normalized spaces.",
+        "Execute a bounded workflow with deterministic postconditions, retry/re-observe recovery, automatic desktop or managed-browser stale-state recovery, and a compact execution trace. Semantic ambiguity fails closed.",
       inputSchema: performSchema,
     },
     async (args) => callTool("perform", args, true),
@@ -460,7 +475,7 @@ function createServer(): McpServer {
     {
       title: "Launch Application",
       description:
-        "Launch a Windows application as the current user. Computer Use for Antigravity does not elevate itself; elevated targets are reported separately.",
+        "Launch a Windows application as the current user. For Chrome or Edge, browser.mode='managed' starts an isolated ephemeral profile and a local restricted CDP session; it never attaches to the user's existing browser profile. Computer Use for Antigravity does not elevate itself; elevated targets are reported separately.",
       inputSchema: launchSchema,
     },
     async (args) => callTool("launch", args),

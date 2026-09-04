@@ -209,7 +209,7 @@ internal sealed class WorkflowRunner
         }
 
         if (!actionExecuted
-            && string.Equals(failure.Code, "STALE_STATE", StringComparison.Ordinal)
+            && failure.Code is "STALE_STATE" or "STALE_BROWSER_STATE" or "BROWSER_FRAME_DETACHED"
             && !staleRecoveryUsed)
         {
             staleRecoveryUsed = true;
@@ -361,13 +361,18 @@ internal sealed class WorkflowRunner
         foreach (var name in new[]
         {
             "element_id", "name", "role", "automation_id", "x", "y", "coordinate_space",
-            "start_target", "end_target", "start", "end"
+            "css", "test_id", "placeholder", "start_target", "end_target", "start", "end"
         })
         {
             if (action[name] is not null)
             {
                 selected[name] = action[name]!.DeepClone();
             }
+        }
+
+        if (action["target"] is JsonObject targetObject && targetObject["text"] is not null)
+        {
+            selected["text"] = targetObject["text"]!.DeepClone();
         }
 
         return selected.Count == 0 ? null : selected;

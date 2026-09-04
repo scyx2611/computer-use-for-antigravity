@@ -227,7 +227,7 @@ internal static class PostconditionEvaluator
         {
             throw new ComputerUseException(
                 "INVALID_POSTCONDITION",
-                $"{conditionName} must identify a UI element with element_id, name, role, or automation_id.");
+                $"{conditionName} must identify a UI element with element_id, name, role, automation_id, css, test_id, text, or placeholder.");
         }
 
         if (descriptor.Coordinates is not null)

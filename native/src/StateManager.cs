@@ -30,7 +30,8 @@ internal sealed class StateManager
         WindowRectData windowRect,
         string windowTitle,
         string? screenshotHash,
-        IReadOnlyList<UiElementSnapshot> elements)
+        IReadOnlyList<UiElementSnapshot> elements,
+        BrowserStateMetadata? browser = null)
     {
         RemoveExpired();
 
@@ -42,7 +43,8 @@ internal sealed class StateManager
             WindowRect = windowRect,
             WindowTitle = windowTitle,
             ScreenshotHash = screenshotHash,
-            Elements = elements
+            Elements = elements,
+            Browser = browser
         };
         states[state.StateId] = state;
         return state;

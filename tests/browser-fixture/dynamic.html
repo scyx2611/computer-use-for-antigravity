@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Dynamic browser fixture</title></head>
+  <body>
+    <main>
+      <h1>Dynamic targets</h1>
+      <button id="show" type="button">Show message</button>
+      <p id="message" hidden>Ready after delay</p>
+      <script>
+        document.getElementById('show').addEventListener('click', () => {
+          setTimeout(() => { document.getElementById('message').hidden = false; }, 300);
+        });
+      </script>
+    </main>
+  </body>
+</html>

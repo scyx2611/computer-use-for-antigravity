@@ -133,6 +133,50 @@ This v0.3 check is additive to the v0.2 application matrix and error/coordinate
 checks above. It does not require Browser/CDP, OCR, an LLM planner, or a new
 MCP tool.
 
+## v0.4 Phase 2 managed browser actions / v0.4 Phase 2 Managed Browser 操作
+
+The current branch's v0.4 Phase 2 scope is managed launch, observe, and the
+deterministic browser actions `click`, `type_text`, `set_value`,
+`press_key`/`hotkey`, `scroll`, and `navigate`. It does not claim browser Host
+acceptance, full browser postconditions, multi-tab, iframe, popup, or arbitrary
+CDP/JavaScript support. Publish to a separate directory and run the native
+checks first:
+
+```powershell
+dotnet publish .\native\ComputerUse.Native.csproj -c Release -r win-x64 --self-contained false -o .\dist\native-v0.4-phase2
+.\scripts\browser-spike-test.ps1 -Browser chrome
+.\scripts\browser-spike-test.ps1 -Browser edge
+.\scripts\browser-action-test.ps1 -Browser chrome
+.\scripts\browser-action-test.ps1 -Browser edge
+```
+
+The direct checks are expected to report `interaction.backend=browser_cdp`,
+`capture.backend=cdp_page_capture`, a managed ephemeral profile, semantic
+input success, navigation/document invalidation, `AMBIGUOUS_TARGET` for the
+duplicate fixture, and clean process/profile teardown. They are native
+integration evidence only; they do not prove that Antigravity has loaded this
+branch.
+
+For a future real Host check, install the Phase 2 build only after the direct
+tests pass, restart Antigravity, and run this in a fresh Agent task without a
+subagent. Keep this as a separate gate:
+
+```text
+使用 Computer Use 的 managed ephemeral Chrome 開啟本地測試頁，先 observe，
+再以 semantic target 執行 set_value、type_text、click、press_key Enter、
+scroll 與 navigate；確認回報 interaction.backend=browser_cdp、
+capture.backend=cdp_page_capture，並確認導航後使用新的 state_id。
+完成後回報實際 computer_launch、computer_observe、computer_act 與
+computer_perform tool trace。
+```
+
+Record Host discovery and the actual tool trace separately. Until that task is
+run against the installed Phase 2 build, v0.4 Host loading and browser action
+execution are **NOT VERIFIED**.
+An ordinary Chrome/Edge opened outside the runtime must remain unmanaged and
+must not be attached. `TARGET_ELEVATED` remains `NOT RUN` unless a safe fixture
+exists.
+
 ## Evidence rules / 證據規則
 
 - A manifest, filesystem check, or MCP `initialize`/`tools/list` handshake is

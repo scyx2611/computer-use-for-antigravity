@@ -9,7 +9,9 @@ internal static class Program
         ("capture backend chain", CaptureBackendTests.Run),
         ("state expiry and drift", StateManagerTests.Run),
         ("postconditions", PostconditionTests.Run),
-        ("workflow runner", WorkflowRunnerTests.Run)
+        ("workflow runner", WorkflowRunnerTests.Run),
+        ("browser safeguards", BrowserTests.Run),
+        ("browser actions", BrowserActionTests.Run)
     ];
 
     public static int Main()

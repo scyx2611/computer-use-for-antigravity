@@ -27,7 +27,7 @@ internal static class Program
             DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
             WriteIndented = false
         };
-        var runtime = new NativeRuntime();
+        using var runtime = new NativeRuntime();
 
         string? line;
         while ((line = Console.ReadLine()) is not null)

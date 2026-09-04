@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Computer Use browser fixture</title>
+    <style>
+      body { font: 16px sans-serif; margin: 40px; }
+      main { max-width: 520px; }
+      label, input, button { display: block; margin: 10px 0; }
+      input { padding: 8px; width: 280px; }
+      button { padding: 8px 16px; }
+      #status { min-height: 24px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Computer Use browser fixture</h1>
+      <form id="acceptance-form" action="/success.html" method="get">
+        <label for="name">Name</label>
+        <input id="name" name="name" placeholder="Enter your name" autocomplete="off">
+        <button id="submit" type="submit">Submit</button>
+      </form>
+      <p id="status" aria-live="polite">Ready</p>
+    </main>
+  </body>
+</html>
