@@ -120,6 +120,12 @@ internal sealed class ObserveResult
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ScreenshotError { get; init; }
 
+    [JsonPropertyName("capture")]
+    public CaptureDiagnostics Capture { get; init; } = new();
+
+    [JsonPropertyName("coordinate_spaces")]
+    public CoordinateSpaces CoordinateSpaces { get; init; } = new();
+
     [JsonPropertyName("uia_error")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? UiaError { get; init; }
@@ -132,6 +138,40 @@ internal sealed class ScreenshotResult
     public string? Hash { get; init; }
 
     public string? Error { get; init; }
+
+    public CaptureDiagnostics Diagnostics { get; init; } = new();
+}
+
+internal sealed class CaptureDiagnostics
+{
+    [JsonPropertyName("backend")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Backend { get; init; }
+
+    [JsonPropertyName("width")]
+    public int Width { get; init; }
+
+    [JsonPropertyName("height")]
+    public int Height { get; init; }
+
+    [JsonPropertyName("hash")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Hash { get; init; }
+
+    [JsonPropertyName("fallback_used")]
+    public bool FallbackUsed { get; init; }
+
+    [JsonPropertyName("errors")]
+    public IReadOnlyList<CaptureFailure> Errors { get; init; } = [];
+}
+
+internal sealed class CaptureFailure
+{
+    [JsonPropertyName("backend")]
+    public string Backend { get; init; } = string.Empty;
+
+    [JsonPropertyName("error")]
+    public string Error { get; init; } = string.Empty;
 }
 
 internal sealed class ActionRecord
@@ -177,6 +217,14 @@ internal sealed class PerformResult
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ScreenshotError { get; init; }
 
+    [JsonPropertyName("capture")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public CaptureDiagnostics? Capture { get; init; }
+
+    [JsonPropertyName("coordinate_spaces")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public CoordinateSpaces? CoordinateSpaces { get; init; }
+
     [JsonPropertyName("elements")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<UiElementSnapshot>? Elements { get; init; }
@@ -184,6 +232,15 @@ internal sealed class PerformResult
     [JsonPropertyName("uia_error")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? UiaError { get; init; }
+}
+
+internal sealed class CoordinateSpaces
+{
+    [JsonPropertyName("screenshot")]
+    public string Screenshot { get; init; } = "window";
+
+    [JsonPropertyName("elements")]
+    public string Elements { get; init; } = "screen";
 }
 
 internal sealed class WindowState

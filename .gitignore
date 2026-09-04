@@ -8,4 +8,8 @@ mcp/node_modules/
 mcp/dist/
 mcp/.tsbuildinfo
 
+tests/**/bin/
+tests/**/obj/
+tests/**/TestResults/
+
 dist/

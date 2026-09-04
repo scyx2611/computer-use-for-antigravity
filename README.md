@@ -8,29 +8,52 @@ The user-facing product name is **Computer Use for Antigravity**. The plugin
 identifier is `computer-use-for-antigravity`, while the MCP server key remains
 `computer-use` for compatibility.
 
-Computer Use for Antigravity keeps the model-facing surface small and moves fragile desktop
-interaction into a deterministic runtime:
+Computer Use for Antigravity keeps the model-facing surface small and moves
+fragile desktop interaction into a deterministic runtime:
 
 ```text
-Antigravity -> MCP stdio -> TypeScript bridge -> JSONL -> .NET native runtime
-                                             -> UI Automation / PrintWindow / SendInput
+Antigravity -> MCP stdio -> TypeScript bridge -> JSONL -> persistent .NET runtime
+                                                       -> UI Automation / SendInput
+                                                       -> WGC -> PrintWindow -> BitBlt
 ```
 
-## Status
+## Status: v0.2 — Reliable Capture & Targeting
 
-This repository contains the first MVP implementation. It supports:
+This release keeps the existing six MCP tools and focuses on safer observation
+and targeting:
 
-- visible top-level window discovery;
-- UI Automation element snapshots;
-- `PrintWindow` PNG capture with a `BitBlt` fallback;
-- five-second state snapshots with stale-state checks;
-- UIA-first actions with native-input and coordinate fallbacks;
-- sequential `perform()` execution and post-action observation;
-- a persistent JSONL native process behind an MCP stdio server;
-- a global Antigravity plugin and a concise computer-use skill.
+- Windows Graphics Capture is the primary screenshot backend.
+- Capture falls back in order to `PrintWindow`, then `BitBlt`.
+- `observe` and verified `perform` responses include `capture` diagnostics:
+  `backend`, `width`, `height`, `hash`, `fallback_used`, and per-backend
+  `errors`.
+- Semantic selectors fail closed with `AMBIGUOUS_TARGET` and a candidate list
+  when multiple elements are equally plausible. A unique exact match remains
+  deterministic.
+- Coordinate targets support `screen`, `window`, and `normalized` spaces.
+  Existing `x`/`y` actions default to `screen` for backwards compatibility.
+- `observe.coordinate_spaces` states that screenshot pixels use `window`
+  coordinates and UI Automation element bounds use `screen` coordinates.
+- The native process remains persistent JSONL, and the six public MCP names
+  remain unchanged.
 
 The runtime intentionally does not elevate itself. Actions against an elevated
 target return `TARGET_ELEVATED` when the target token can be inspected.
+
+## Coordinate spaces
+
+Use `coordinate_space` on an action or coordinate target:
+
+| Space | Meaning |
+| --- | --- |
+| `screen` | Absolute desktop pixels. This is the default for existing `x`/`y` calls. |
+| `window` | Pixels relative to the observed window's top-left corner. |
+| `normalized` | Fractions from `0` to `1` across the observed window; `(1, 1)` maps to its last pixel. |
+
+Element `bounds` remain `[left, top, width, height]` in screen coordinates.
+The screenshot is encoded from the captured window surface, so its pixel origin
+is the window origin. Use the `coordinate_spaces` object in the observation
+instead of inferring a coordinate system from the image.
 
 ## Build
 
@@ -46,8 +69,12 @@ From this directory:
 dotnet build .\native\ComputerUse.Native.csproj -c Release
 dotnet publish .\native\ComputerUse.Native.csproj -c Release -r win-x64 --self-contained false -o .\dist\native
 
+dotnet build .\tests\ComputerUse.Native.Tests\ComputerUse.Native.Tests.csproj -c Release
+dotnet run --project .\tests\ComputerUse.Native.Tests\ComputerUse.Native.Tests.csproj -c Release --no-build
+
 Push-Location .\mcp
 npm ci
+npm run typecheck
 npm run build
 Pop-Location
 ```
@@ -59,6 +86,20 @@ dist/native/ComputerUse.Native.exe
 mcp/dist/index.js
 ```
 
+## Windows smoke test
+
+After publishing, run the controlled Notepad end-to-end check:
+
+```powershell
+.\scripts\smoke-test.ps1
+```
+
+The script starts only its own native process and a temporary Notepad
+document, checks WGC capture diagnostics, types text, refreshes state, and
+undoes the test input. It closes only the window/process it started. A host
+plugin invocation is a separate acceptance gate; this script does not prove
+that Antigravity has reloaded the global plugin.
+
 ## Install globally
 
 After building, install the plugin for the current Windows user:
@@ -68,24 +109,24 @@ After building, install the plugin for the current Windows user:
 ```
 
 The installer copies the plugin and `computer-use` skill to
-`%USERPROFILE%/.gemini/config/plugins/computer-use-for-antigravity/`, then writes
-machine-specific paths using UTF-8 without a BOM. Existing entries in the global
-MCP configuration are preserved. Restart Antigravity after installation so it
-reloads the plugin and MCP configuration.
+`%USERPROFILE%/.gemini/config/plugins/computer-use-for-antigravity/`, then
+writes machine-specific paths using UTF-8 without a BOM. Existing entries in
+the global MCP configuration are preserved. Restart Antigravity after
+installation so it reloads the plugin and MCP configuration.
 
 Use `-SkipGlobalMcpConfig` when the host should load the server only from the
 plugin's own `mcp_config.json`.
 
 ## MCP configuration
 
-The repository does not commit machine-specific absolute paths. The
-`plugin/mcp_config.example.json` file is a template; replace `<REPOSITORY_ROOT>`
+The repository does not commit machine-specific absolute paths.
+`plugin/mcp_config.example.json` is a template; replace `<REPOSITORY_ROOT>`
 with the clone path if configuring MCP manually. The recommended path is
 `install.ps1`, which generates the plugin and global configuration for the
 current clone. A workspace copy is intentionally not installed, so the global
 plugin is not loaded twice when this repository is open.
 
-## Native JSONL smoke test
+## Native JSONL smoke probe
 
 The native process is a long-lived single-request queue. Each input line is a
 JSON request and each output line is a JSON response:
@@ -96,9 +137,9 @@ $native = Resolve-Path .\dist\native\ComputerUse.Native.exe
   & $native
 ```
 
-`observe` returns screen-coordinate bounds as `[left, top, width, height]`.
-Its screenshot is base64 PNG data in the native response; the MCP bridge
-returns that data as an MCP image content block.
+`observe` returns screen-coordinate UIA bounds and a window-coordinate
+screenshot. The screenshot is base64 PNG data in the native response; the MCP
+bridge returns it as an MCP image content block.
 
 ## MCP tools
 
@@ -113,11 +154,24 @@ The public tools are:
 
 `computer_observe` should precede element-id actions. Prefer semantic targets
 (`name`, `role`, and `automation_id`) inside `computer_perform`; the runtime
-resolves them in deterministic order and re-observes between actions.
+resolves them deterministically, refuses ambiguous matches, and re-observes
+between actions.
 
-## Known MVP limits
+## v0.2 limitations
 
-`PrintWindow` can return black or incomplete images for some Chromium, DirectX,
-game, and GPU surfaces. Minimized-window capture is not a guarantee. Windows
-Graphics Capture, multi-monitor improvements, browser CDP/Playwright support,
-OCR, and richer drag/scroll verification belong to later versions.
+Windows Graphics Capture is best-effort. It can be unavailable on unsupported
+Windows/graphics environments, protected surfaces, minimized windows, remote
+sessions, or some GPU applications; the response exposes the failure and
+fallback path. The WGC implementation uses the Windows SDK Direct3D 11
+interop path and currently reads back BGRA8 frames synchronously.
+
+This release does not add Browser/CDP, OCR, a policy engine, new MCP tools, or
+macOS/Linux support. Multi-monitor edge cases, richer drag/scroll verification,
+and additional capture optimizations remain future work.
+
+The WGC API flow follows Microsoft's [Windows Graphics Capture
+documentation](https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture),
+the HWND interop contract
+([CreateForWindow](https://learn.microsoft.com/en-us/windows/win32/api/windows.graphics.capture.interop/nf-windows-graphics-capture-interop-igraphicscaptureiteminterop-createforwindow)),
+and the Direct3D 11 bridge
+([CreateDirect3D11DeviceFromDXGIDevice](https://learn.microsoft.com/en-us/windows/win32/api/windows.graphics.directx.direct3d11.interop/nf-windows-graphics-directx-direct3d11-interop-createdirect3d11devicefromdxgidevice)).

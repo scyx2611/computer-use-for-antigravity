@@ -204,6 +204,8 @@ class NativeRpcClient {
 
 const native = new NativeRpcClient();
 
+const coordinateSpaceSchema = z.enum(["screen", "window", "normalized"]);
+
 const targetSelectorSchema = z
   .object({
     element_id: z.number().int().optional(),
@@ -211,8 +213,9 @@ const targetSelectorSchema = z
     name: z.string().optional(),
     role: z.string().optional(),
     automation_id: z.string().optional(),
-    x: z.number().int().optional(),
-    y: z.number().int().optional(),
+    x: z.number().optional(),
+    y: z.number().optional(),
+    coordinate_space: coordinateSpaceSchema.optional(),
   })
   .passthrough();
 
@@ -235,8 +238,9 @@ const actionSchema = z
     name: z.string().optional(),
     role: z.string().optional(),
     automation_id: z.string().optional(),
-    x: z.number().int().optional(),
-    y: z.number().int().optional(),
+    x: z.number().optional(),
+    y: z.number().optional(),
+    coordinate_space: coordinateSpaceSchema.optional(),
     text: z.string().optional(),
     value: z.string().optional(),
     key: z.string().optional(),
@@ -358,7 +362,7 @@ async function callTool(
 }
 
 function createServer(): McpServer {
-  const server = new McpServer({ name: "computer-use", version: "0.1.0" });
+  const server = new McpServer({ name: "computer-use", version: "0.2.0" });
 
   server.registerTool(
     "computer_list_windows",
@@ -375,7 +379,7 @@ function createServer(): McpServer {
     {
       title: "Observe Window",
       description:
-        "Capture a Windows application window as a screenshot plus a semantic UI Automation element tree. Use this before element-id actions.",
+        "Capture a Windows application window as a screenshot plus a semantic UI Automation element tree. The response reports the capture backend, fallback diagnostics, and that screenshot coordinates are window-relative while UI Automation bounds are screen-relative. Use this before element-id actions.",
       inputSchema: observeSchema,
     },
     async (args) => callTool("observe", args, true),
@@ -386,7 +390,7 @@ function createServer(): McpServer {
     {
       title: "Act on Window",
       description:
-        "Execute one UI action against a recent computer_observe state. Element ids are state-bound and fail safely with STALE_STATE when the UI changed.",
+        "Execute one UI action against a recent computer_observe state. Element ids are state-bound and fail safely with STALE_STATE when the UI changed; ambiguous semantic selectors fail with AMBIGUOUS_TARGET and candidates instead of guessing. Coordinate targets support screen, window, and normalized spaces.",
       inputSchema: actSchema,
     },
     async (args) => callTool("act", args),
@@ -397,7 +401,7 @@ function createServer(): McpServer {
     {
       title: "Perform Actions",
       description:
-        "Resolve and execute a short sequential action plan, re-observing between actions and optionally returning a verified final observation.",
+        "Resolve and execute a short sequential action plan, re-observing between actions and optionally returning a verified final observation. Semantic ambiguity fails closed; coordinate targets support screen, window, and normalized spaces.",
       inputSchema: performSchema,
     },
     async (args) => callTool("perform", args, true),

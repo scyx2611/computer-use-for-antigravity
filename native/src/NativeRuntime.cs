@@ -45,7 +45,7 @@ internal sealed class NativeRuntime
         return new JsonObject
         {
             ["name"] = "computer-use-native",
-            ["version"] = "0.1.0",
+            ["version"] = "0.2.0",
             ["platform"] = "windows",
             ["protocol"] = "jsonl"
         };
@@ -127,6 +127,8 @@ internal sealed class NativeRuntime
             Screenshot = finalObservation?.Screenshot,
             ScreenshotHash = finalObservation?.ScreenshotHash,
             ScreenshotError = finalObservation?.ScreenshotError,
+            Capture = finalObservation?.Capture,
+            CoordinateSpaces = finalObservation?.CoordinateSpaces,
             Elements = finalObservation?.Elements,
             UiaError = finalObservation?.UiaError
         });
@@ -299,6 +301,8 @@ internal sealed class NativeRuntime
             Screenshot = screenshot.Base64,
             ScreenshotHash = screenshot.Hash,
             ScreenshotError = screenshot.Error,
+            Capture = screenshot.Diagnostics,
+            CoordinateSpaces = new CoordinateSpaces(),
             UiaError = uiaError
         };
     }

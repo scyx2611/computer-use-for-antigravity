@@ -6,6 +6,24 @@ internal sealed class StateManager
 {
     private const long StateTtlMilliseconds = 5_000;
     private readonly Dictionary<string, WindowState> states = new(StringComparer.Ordinal);
+    private readonly long stateTtlMilliseconds;
+    private readonly Func<long> nowMilliseconds;
+
+    public StateManager()
+        : this(StateTtlMilliseconds, () => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+    {
+    }
+
+    internal StateManager(long stateTtlMilliseconds, Func<long> nowMilliseconds)
+    {
+        if (stateTtlMilliseconds < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(stateTtlMilliseconds));
+        }
+
+        this.stateTtlMilliseconds = stateTtlMilliseconds;
+        this.nowMilliseconds = nowMilliseconds ?? throw new ArgumentNullException(nameof(nowMilliseconds));
+    }
 
     public WindowState Create(
         IntPtr hwnd,
@@ -20,7 +38,7 @@ internal sealed class StateManager
         {
             StateId = Guid.NewGuid().ToString("N"),
             Hwnd = hwnd,
-            CreatedUnixMilliseconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            CreatedUnixMilliseconds = nowMilliseconds(),
             WindowRect = windowRect,
             WindowTitle = windowTitle,
             ScreenshotHash = screenshotHash,
@@ -123,9 +141,9 @@ internal sealed class StateManager
 
     private void RemoveExpired()
     {
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var now = nowMilliseconds();
         var expired = states
-            .Where(pair => now - pair.Value.CreatedUnixMilliseconds > StateTtlMilliseconds)
+            .Where(pair => now - pair.Value.CreatedUnixMilliseconds > stateTtlMilliseconds)
             .Select(pair => pair.Key)
             .ToArray();
 
