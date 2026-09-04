@@ -8,6 +8,12 @@ description: Use Computer Use for Antigravity to interact with Windows applicati
 Use Computer Use for Antigravity to interact with Windows applications and desktop GUI via MCP tools.
 
 ## Execution Guidelines
+- **Workflow Postconditions**: For computer_perform, use deterministic UIA/state expectations for element existence/absence, enabled state, exact value, window-title containment, UI change, and UI stability.
+- **Bounded Retry**: Add retry.max_attempts and retry.delay_ms only for bounded transient or idempotent recovery. The default is one attempt.
+- **Automatic Stale Recovery**: computer_perform owns a bounded stale re-observe and re-resolution when input has not been confirmed. computer_act keeps explicit state semantics and requires a fresh observe after STALE_STATE.
+- **Retry Safety**: Never retry TARGET_ELEVATED, invalid schemas, unsupported actions, or ambiguous input blindly. After input executes, only idempotent set_value and wait may retry a failed postcondition or stability check.
+- **Execution Trace**: Inspect execution_trace for step index, attempt, requested/resolved target, resolution method, state and screenshot hashes, capture backend, verification, retry reason, duration, and final status.
+- **Workflow Failure**: Treat a failed computer_perform result as structured data. Use its stable error code, failed step, attempt, action-executed flag, verification, retry exhaustion flag, last observation, and execution trace to decide what to do next.
 - **Primary Agent Only**: Desktop GUI operations must be executed directly by the primary agent using `call_mcp_tool` (ServerName: "computer-use"). Do not delegate GUI operations to subagents (subagents do not have access to lazy MCP tools).
 - **No Scratch Scripts**: Do not write scratch scripts or modify native C# source code to interact with the GUI; call MCP tools directly.
 - **No Schema Inspection**: Directly use the parameters below without reading `.json` schema files.

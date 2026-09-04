@@ -175,6 +175,7 @@ internal sealed class AutomationEngine
             var role = NormalizeRole(current.ControlType);
             var bounds = ToBounds(current.BoundingRectangle);
             var isOffscreen = current.IsOffscreen;
+            var value = ReadValue(element);
 
             if (bounds[2] <= 0 || bounds[3] <= 0 || isOffscreen)
             {
@@ -197,7 +198,8 @@ internal sealed class AutomationEngine
                 Bounds = bounds,
                 IsEnabled = current.IsEnabled,
                 IsOffscreen = isOffscreen,
-                RuntimeId = ReadRuntimeId(element)
+                RuntimeId = ReadRuntimeId(element),
+                Value = value
             };
             return true;
         }
@@ -224,6 +226,35 @@ internal sealed class AutomationEngine
         {
             return string.Empty;
         }
+    }
+
+    private static string? ReadValue(AutomationElement element)
+    {
+        try
+        {
+            if (element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern)
+                && pattern is ValuePattern valuePattern)
+            {
+                var value = valuePattern.Current.Value;
+                if (string.IsNullOrEmpty(value))
+                {
+                    return value;
+                }
+
+                return value.Length <= 4_096 ? value : value[..4_096];
+            }
+        }
+        catch (ElementNotAvailableException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (ArgumentException)
+        {
+        }
+
+        return null;
     }
 
     private static int[] ToBounds(Rect rectangle)

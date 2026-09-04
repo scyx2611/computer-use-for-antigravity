@@ -95,6 +95,10 @@ internal sealed class UiElementSnapshot
 
     [JsonPropertyName("runtime_id")]
     public string RuntimeId { get; init; } = string.Empty;
+
+    [JsonPropertyName("value")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Value { get; init; }
 }
 
 internal sealed class ObserveResult
@@ -197,6 +201,12 @@ internal sealed class PerformResult
 
     [JsonPropertyName("actions")]
     public IReadOnlyList<ActionRecord> Actions { get; init; } = [];
+
+    [JsonPropertyName("status")]
+    public string Status { get; init; } = "succeeded";
+
+    [JsonPropertyName("execution_trace")]
+    public IReadOnlyList<ExecutionTraceEntry> ExecutionTrace { get; init; } = [];
 
     [JsonPropertyName("verified")]
     public bool Verified { get; init; }

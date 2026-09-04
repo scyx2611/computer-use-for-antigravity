@@ -1,16 +1,17 @@
 # Antigravity Host Acceptance
 
 This checklist validates the installed global `computer-use` plugin inside a
-real Antigravity Agent task. It is a host-level gate for v0.2 and is separate
-from the native unit tests, MCP handshake, and local smoke test. It does not
-define or implement v0.3.
+real Antigravity Agent task. It is a host-level gate for v0.2 plus the v0.3
+workflow acceptance cases, and is separate from the native unit tests, MCP
+handshake, and local smoke test. It documents host acceptance; it does not
+define or implement the runtime.
 
 ## 驗收目的
 
 這份 checklist 驗證全域 `computer-use` plugin 是否真的由 Antigravity
-Host 載入，並能在實際 Agent 任務中調用 Computer Use MCP。它是 v0.2 的
-Host-level gate，與 native unit tests、MCP handshake、local smoke test
-分開計算；不包含 v0.3 功能。
+Host 載入，並能在實際 Agent 任務中調用 Computer Use MCP。它包含 v0.2
+Host-level gate 與 v0.3 workflow 驗收案例，並與 native unit tests、MCP
+handshake、local smoke test 分開計算；文件只描述 Host 驗收，不實作 runtime。
 
 ## Preconditions / 前置條件
 
@@ -105,6 +106,32 @@ coordinates as window-relative and UIA element bounds in screen coordinates.
 
 Recorded result on 2026-09-04: **PASS** — all three center actions succeeded;
 WGC was used and no fallback errors were reported.
+
+## v0.3 workflow acceptance / v0.3 Workflow 驗收
+
+After installing the v0.3 build and restarting Antigravity, run a controlled
+Notepad workflow with a deterministic postcondition and an execution trace:
+
+    開啟記事本，直接使用 Computer Use 執行一個 computer_perform workflow：
+    輸入一段唯一文字，對輸入 action 驗證 ui_changed=true 與 ui_stable=true，
+    再執行 CTRL+Z 並驗證 ui_changed=true。不要建立子代理人，完成後回報
+    execution_trace、每一步 verification、attempt 次數與 capture.backend。
+
+Pass only when:
+
+- the actual Host task emits one computer_perform call with two or more actions;
+- every action has an ordered trace entry with step_index, attempt, before/after
+  state or screenshot hashes, and final_status;
+- the requested postconditions are passed;
+- a transient failure can be shown to recover within the configured bound;
+- an intentionally wrong postcondition returns a structured failure naming the
+  correct step, attempt, verification result, and last observation;
+- a click or text-input postcondition failure is not blindly repeated;
+- TARGET_ELEVATED remains untested unless a safe fixture is available.
+
+This v0.3 check is additive to the v0.2 application matrix and error/coordinate
+checks above. It does not require Browser/CDP, OCR, an LLM planner, or a new
+MCP tool.
 
 ## Evidence rules / 證據規則
 

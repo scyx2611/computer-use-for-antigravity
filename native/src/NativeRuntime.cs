@@ -45,7 +45,7 @@ internal sealed class NativeRuntime
         return new JsonObject
         {
             ["name"] = "computer-use-native",
-            ["version"] = "0.2.0",
+            ["version"] = "0.3.0",
             ["platform"] = "windows",
             ["protocol"] = "jsonl"
         };
@@ -81,8 +81,8 @@ internal sealed class NativeRuntime
 
         windows.EnsureInputAllowed(state.Hwnd);
         states.ValidateWindow(state, state.Hwnd, windows);
-        var record = actions.Execute(state.Hwnd, state, action);
-        return ToNode(record);
+        var execution = actions.Execute(state.Hwnd, state, action);
+        return ToNode(execution.Record);
     }
 
     private JsonNode Perform(JsonObject parameters)
@@ -100,7 +100,7 @@ internal sealed class NativeRuntime
         }
 
         var verify = GetOptionalBool(parameters, "verify") ?? true;
-        var records = new List<ActionRecord>(actionArray.Count);
+        var actionObjects = new List<JsonObject>(actionArray.Count);
         foreach (var actionNode in actionArray)
         {
             if (actionNode is not JsonObject action)
@@ -108,21 +108,32 @@ internal sealed class NativeRuntime
                 throw new ComputerUseException("INVALID_ACTION", "Each item in actions must be a JSON object.");
             }
 
-            var observed = ObserveWindow(hwnd);
-            var state = states.Require(observed.StateId);
-            var record = actions.Execute(hwnd, state, action);
-            records.Add(record);
-            WaitForUiStable(hwnd);
+            actionObjects.Add(action);
         }
 
-        ObserveResult? finalObservation = verify ? ObserveWindow(hwnd) : null;
+        var workflow = new WorkflowRunner().Run(
+            new DelegateWorkflowDriver(
+                ensureInputAllowed: () => windows.EnsureInputAllowed(hwnd),
+                observe: () => new WorkflowObservation(ObserveWindow(hwnd)),
+                execute: (observation, action) =>
+                {
+                    var state = states.Require(observation.Result.StateId);
+                    states.ValidateWindow(state, hwnd, windows);
+                    return actions.Execute(hwnd, state, action);
+                },
+                waitForUiStable: observation => WaitForUiStable(hwnd, observation.UiSignature)),
+            actionObjects,
+            verify);
+        var finalObservation = workflow.FinalObservation?.Result;
         var window = windows.GetWindowSnapshot(hwnd);
 
         return ToNode(new PerformResult
         {
             Window = window,
-            Actions = records,
-            Verified = verify && finalObservation is not null,
+            Actions = workflow.Actions,
+            Status = "succeeded",
+            ExecutionTrace = workflow.ExecutionTrace,
+            Verified = workflow.Verified,
             StateId = finalObservation?.StateId,
             Screenshot = finalObservation?.Screenshot,
             ScreenshotHash = finalObservation?.ScreenshotHash,
@@ -307,12 +318,18 @@ internal sealed class NativeRuntime
         };
     }
 
-    private void WaitForUiStable(IntPtr hwnd)
+    private UiStabilityResult WaitForUiStable(IntPtr hwnd, string initialSignature)
     {
+        const int timeoutMilliseconds = 1_500;
+        const int pollMilliseconds = 100;
+        const int stableSamplesRequired = 2;
         var deadline = Stopwatch.GetTimestamp()
-            + (long)(1_500 * (double)Stopwatch.Frequency / 1000.0);
+            + (long)(timeoutMilliseconds * (double)Stopwatch.Frequency / 1000.0);
         string? previous = null;
+        string? finalSignature = null;
         var stableSamples = 0;
+        var changed = false;
+        var start = Stopwatch.GetTimestamp();
 
         while (Stopwatch.GetTimestamp() < deadline)
         {
@@ -326,22 +343,44 @@ internal sealed class NativeRuntime
                 // Some providers briefly reject queries while they redraw.
             }
 
-            if (current is not null && string.Equals(previous, current, StringComparison.Ordinal))
+            if (current is not null)
             {
-                stableSamples++;
-                if (stableSamples >= 2)
+                finalSignature = current;
+                changed |= !string.Equals(initialSignature, current, StringComparison.Ordinal);
+                if (string.Equals(previous, current, StringComparison.Ordinal))
                 {
-                    return;
+                    stableSamples++;
+                }
+                else
+                {
+                    stableSamples = 1;
+                    previous = current;
+                }
+
+                if (stableSamples >= stableSamplesRequired)
+                {
+                    return new UiStabilityResult
+                    {
+                        Status = "stable",
+                        Changed = changed,
+                        ElapsedMilliseconds = ElapsedMilliseconds(start),
+                        InitialSignature = initialSignature,
+                        FinalSignature = finalSignature
+                    };
                 }
             }
-            else
-            {
-                stableSamples = 0;
-                previous = current;
-            }
 
-            Thread.Sleep(100);
+            Thread.Sleep(pollMilliseconds);
         }
+
+        return new UiStabilityResult
+        {
+            Status = "timeout",
+            Changed = changed,
+            ElapsedMilliseconds = ElapsedMilliseconds(start),
+            InitialSignature = initialSignature,
+            FinalSignature = finalSignature
+        };
     }
 
     private WindowInfo? FindWindow(string? windowId, string? titleContains, string? processContains)

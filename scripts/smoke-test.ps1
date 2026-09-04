@@ -107,17 +107,33 @@ try {
         $typeAction.element_id = $document.id
     }
 
-    $acted = Invoke-Native 'act' @{ state_id = $observed.result.state_id; action = $typeAction } $nextId
+    $typeAction.expect = @{
+        ui_changed = $true
+        ui_stable = $true
+    }
+    $undoAction = @{
+        type = 'press_key'
+        key = 'CTRL+Z'
+        expect = @{
+            ui_changed = $true
+            ui_stable = $true
+        }
+    }
+    $workflow = Invoke-Native 'perform' @{
+        window_id = $target.id
+        actions = @($typeAction, $undoAction)
+        verify = $true
+    } $nextId
     $nextId++
-    Assert-Condition ($acted.result.success -eq $true) 'type_text action did not succeed'
-    $afterAction = Invoke-Native 'observe' @{ window_id = $target.id } $nextId
-    $nextId++
-    Assert-Condition ($afterAction.result.state_id -ne $observed.result.state_id) 'state_id did not refresh after action'
-    Assert-Condition ($afterAction.result.screenshot_hash -ne $observed.result.screenshot_hash) 'screenshot hash did not change after typing'
-
-    $undone = Invoke-Native 'act' @{ state_id = $afterAction.result.state_id; action = @{ type = 'press_key'; key = 'CTRL+Z' } } $nextId
-    Assert-Condition ($undone.result.success -eq $true) 'cleanup undo action did not succeed'
-    Write-Output 'SMOKE action: type_text succeeded; refreshed state; undo succeeded.'
+    Assert-Condition ($workflow.result.status -eq 'succeeded') 'workflow did not succeed'
+    Assert-Condition ($workflow.result.verified -eq $true) 'workflow did not return a verified final observation'
+    $trace = @($workflow.result.execution_trace)
+    Assert-Condition ($trace.Count -eq 2) 'workflow trace did not include both actions'
+    Assert-Condition ($trace[0].verification.passed -eq $true) 'type_text postcondition did not pass'
+    Assert-Condition ($trace[1].verification.passed -eq $true) 'undo postcondition did not pass'
+    Assert-Condition ([bool]$workflow.result.screenshot) 'workflow did not return final screenshot data'
+    Assert-Condition ([bool]$workflow.result.capture.backend) 'workflow did not return final capture diagnostics'
+    Write-Output ("SMOKE workflow: postconditions passed; trace_steps={0}; backend={1}; fallback_used={2}" -f $trace.Count, $workflow.result.capture.backend, $workflow.result.capture.fallback_used)
 }
 finally {
     if ($null -ne $native -and -not $native.HasExited) {

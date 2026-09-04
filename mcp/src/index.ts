@@ -219,6 +219,41 @@ const targetSelectorSchema = z
   })
   .passthrough();
 
+const postconditionTargetSchema = z.union([targetSelectorSchema, z.string()]);
+const postconditionTargetOrWrapperSchema = z.union([
+  postconditionTargetSchema,
+  z
+    .object({
+      target: postconditionTargetSchema,
+    })
+    .passthrough(),
+]);
+const postconditionSchema = z
+  .object({
+    element: postconditionTargetOrWrapperSchema.optional(),
+    element_absent: postconditionTargetOrWrapperSchema.optional(),
+    element_enabled: postconditionTargetOrWrapperSchema.optional(),
+    element_disabled: postconditionTargetOrWrapperSchema.optional(),
+    value: z
+      .object({
+        target: postconditionTargetSchema,
+        equals: z.string(),
+      })
+      .passthrough()
+      .optional(),
+    window_title_contains: z.string().min(1).optional(),
+    ui_changed: z.boolean().optional(),
+    ui_stable: z.boolean().optional(),
+  })
+  .passthrough();
+
+const retrySchema = z
+  .object({
+    max_attempts: z.number().int().min(1).max(5).optional(),
+    delay_ms: z.number().int().min(0).max(5_000).optional(),
+  })
+  .passthrough();
+
 const actionSchema = z
   .object({
     type: z.enum([
@@ -251,6 +286,8 @@ const actionSchema = z
     end_target: z.union([targetSelectorSchema, z.string()]).optional(),
     start: z.union([targetSelectorSchema, z.string()]).optional(),
     end: z.union([targetSelectorSchema, z.string()]).optional(),
+    expect: postconditionSchema.optional(),
+    retry: retrySchema.optional(),
   })
   .passthrough();
 
@@ -362,7 +399,7 @@ async function callTool(
 }
 
 function createServer(): McpServer {
-  const server = new McpServer({ name: "computer-use", version: "0.2.0" });
+  const server = new McpServer({ name: "computer-use", version: "0.3.0" });
 
   server.registerTool(
     "computer_list_windows",
@@ -401,7 +438,7 @@ function createServer(): McpServer {
     {
       title: "Perform Actions",
       description:
-        "Resolve and execute a short sequential action plan, re-observing between actions and optionally returning a verified final observation. Semantic ambiguity fails closed; coordinate targets support screen, window, and normalized spaces.",
+        "Execute a bounded workflow with deterministic postconditions, retry/re-observe recovery, automatic stale-state recovery, and a compact execution trace. Semantic ambiguity fails closed; coordinate targets support screen, window, and normalized spaces.",
       inputSchema: performSchema,
     },
     async (args) => callTool("perform", args, true),

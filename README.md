@@ -17,10 +17,10 @@ Antigravity -> MCP stdio -> TypeScript bridge -> JSONL -> persistent .NET runtim
                                                        -> WGC -> PrintWindow -> BitBlt
 ```
 
-## Status: v0.2 — Reliable Capture & Targeting
+## Status: v0.3 — Reliable Workflow Execution
 
-This release keeps the existing six MCP tools and focuses on safer observation
-and targeting:
+This release keeps the existing six MCP tools and builds reliable workflow
+execution on top of the v0.2 capture and targeting guarantees:
 
 - Windows Graphics Capture is the primary screenshot backend.
 - Capture falls back in order to `PrintWindow`, then `BitBlt`.
@@ -36,6 +36,18 @@ and targeting:
   coordinates and UI Automation element bounds use `screen` coordinates.
 - The native process remains persistent JSONL, and the six public MCP names
   remain unchanged.
+- computer_perform accepts deterministic action postconditions such as element
+  existence/absence, enabled state, exact value, title containment, UI change,
+  and UI stability.
+- Each action may opt into bounded retries with retry.max_attempts and
+  retry.delay_ms. The default is one attempt; automatic stale-state recovery
+  performs one safe re-observation when input has not been confirmed.
+- computer_perform returns a compact execution_trace with the requested target,
+  resolution, state/screenshot hashes, capture backend, verification, retry
+  reason, duration, and final status.
+- Workflow failures preserve stable error codes and include the failed step,
+  attempt, action-executed flag, last observation summary, verification, and
+  trace.
 
 The runtime intentionally does not elevate itself. Actions against an elevated
 target return `TARGET_ELEVATED` when the target token can be inspected.
@@ -160,7 +172,48 @@ The public tools are:
 resolves them deterministically, refuses ambiguous matches, and re-observes
 between actions.
 
-## v0.2 limitations
+A workflow action can verify its result without image recognition or an LLM:
+
+    {
+      "window_id": "123456",
+      "actions": [
+        {
+          "type": "click",
+          "target": { "name": "Settings", "role": "Button" },
+          "expect": {
+            "element": { "name": "Settings", "role": "Window" },
+            "ui_stable": true
+          },
+          "retry": { "max_attempts": 2, "delay_ms": 150 }
+        },
+        {
+          "type": "set_value",
+          "target": { "automation_id": "modelSelector" },
+          "value": "Gemini",
+          "expect": {
+            "value": {
+              "target": { "automation_id": "modelSelector" },
+              "equals": "Gemini"
+            }
+          }
+        }
+      ],
+      "verify": true
+    }
+
+Retries are bounded and fail closed. A stale state is re-observed and
+re-resolved inside computer_perform; computer_act keeps its explicit
+state-bound behavior. Ambiguous targets are never replaced by the first
+candidate, and TARGET_ELEVATED is never retried. After input has executed,
+postcondition/stability retries are limited to idempotent set_value and wait;
+actions such as click and text input are not blindly repeated.
+
+Supported postcondition keys are element, element_absent, element_enabled,
+element_disabled, value, window_title_contains, ui_changed, and ui_stable.
+The result's execution_trace is intentionally compact and does not duplicate
+the full UI tree for every attempt.
+
+## v0.3 limitations
 
 Windows Graphics Capture is best-effort. It can be unavailable on unsupported
 Windows/graphics environments, protected surfaces, minimized windows, remote
@@ -168,9 +221,11 @@ sessions, or some GPU applications; the response exposes the failure and
 fallback path. The WGC implementation uses the Windows SDK Direct3D 11
 interop path and currently reads back BGRA8 frames synchronously.
 
-This release does not add Browser/CDP, OCR, a policy engine, new MCP tools, or
-macOS/Linux support. Multi-monitor edge cases, richer drag/scroll verification,
-and additional capture optimizations remain future work.
+This release does not add Browser/CDP, OCR, a policy engine, new MCP tools,
+LLM planning, or macOS/Linux support. Multi-monitor edge cases, richer
+drag/scroll postconditions, and additional capture optimizations remain future
+work. TARGET_ELEVATED host acceptance remains unverified unless a safe
+elevated GUI fixture is actually available.
 
 The WGC API flow follows Microsoft's [Windows Graphics Capture
 documentation](https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture),

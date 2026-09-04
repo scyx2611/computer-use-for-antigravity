@@ -22,7 +22,7 @@ internal sealed class ActionExecutor
         this.windows = windows;
     }
 
-    public ActionRecord Execute(IntPtr hwnd, WindowState state, JsonObject action)
+    public ActionExecutionResult Execute(IntPtr hwnd, WindowState state, JsonObject action)
     {
         var type = GetRequiredString(action, "type").ToLowerInvariant();
         var target = ResolveTarget(hwnd, state, action, allowFocusedTextTarget: type == "type_text");
@@ -104,13 +104,20 @@ internal sealed class ActionExecutor
                     ResolvePoint(endTarget, hwnd),
                     windows,
                     hwnd);
-                return new ActionRecord
-                {
-                    Type = type,
-                    Success = true,
-                    Target = $"{startTarget.Label} -> {endTarget.Label}",
-                    Message = "Drag completed."
-                };
+                return new ActionExecutionResult(
+                    new ActionRecord
+                    {
+                        Type = type,
+                        Success = true,
+                        Target = $"{startTarget.Label} -> {endTarget.Label}",
+                        Message = "Drag completed."
+                    },
+                    new JsonArray
+                    {
+                        startTarget.Resolution?.DeepClone(),
+                        endTarget.Resolution?.DeepClone()
+                    },
+                    true);
 
             case "wait":
                 var milliseconds = GetInt(action, "milliseconds", 100, 0, 30_000);
@@ -147,7 +154,12 @@ internal sealed class ActionExecutor
             }
 
             StateManager.ValidateElementDrift(expected, current.Snapshot);
-            return new ResolvedTarget(current.Element, current.Snapshot, null, Describe(expected));
+            return new ResolvedTarget(
+                current.Element,
+                current.Snapshot,
+                null,
+                Describe(expected),
+                BuildResolution(descriptor, current.Snapshot, null));
         }
 
         if (descriptor.HasSelector)
@@ -161,12 +173,22 @@ internal sealed class ActionExecutor
                     $"No UI element matched {descriptor.Describe()}.");
             }
 
-            return new ResolvedTarget(current.Element, current.Snapshot, null, Describe(current.Snapshot));
+            return new ResolvedTarget(
+                current.Element,
+                current.Snapshot,
+                null,
+                Describe(current.Snapshot),
+                BuildResolution(descriptor, current.Snapshot, null));
         }
 
         if (descriptor.Coordinates is not null)
         {
-            return new ResolvedTarget(null, null, descriptor.Coordinates, descriptor.Describe());
+            return new ResolvedTarget(
+                null,
+                null,
+                descriptor.Coordinates,
+                descriptor.Describe(),
+                BuildResolution(descriptor, null, descriptor.Coordinates));
         }
 
         if (allowFocusedTextTarget)
@@ -174,7 +196,16 @@ internal sealed class ActionExecutor
             var focused = automation.GetFocusedElement();
             if (focused is not null && automation.IsElementInWindow(focused, hwnd))
             {
-                return new ResolvedTarget(focused, null, null, "focused element");
+                return new ResolvedTarget(
+                    focused,
+                    null,
+                    null,
+                    "focused element",
+                    new JsonObject
+                    {
+                        ["method"] = "focused_element",
+                        ["label"] = "focused element"
+                    });
             }
 
             if (focused is not null)
@@ -185,7 +216,7 @@ internal sealed class ActionExecutor
             }
         }
 
-        return new ResolvedTarget(null, null, null, null);
+        return new ResolvedTarget(null, null, null, null, null);
     }
 
     private ResolvedTarget ResolveSecondaryTarget(
@@ -221,7 +252,12 @@ internal sealed class ActionExecutor
             }
 
             StateManager.ValidateElementDrift(expected, current.Snapshot);
-            return new ResolvedTarget(current.Element, current.Snapshot, null, Describe(expected));
+            return new ResolvedTarget(
+                current.Element,
+                current.Snapshot,
+                null,
+                Describe(expected),
+                BuildResolution(descriptor, current.Snapshot, null));
         }
 
         if (descriptor.HasSelector)
@@ -232,12 +268,22 @@ internal sealed class ActionExecutor
                 throw new ComputerUseException("TARGET_NOT_FOUND", $"No drag target matched {descriptor.Describe()}.");
             }
 
-            return new ResolvedTarget(current.Element, current.Snapshot, null, Describe(current.Snapshot));
+            return new ResolvedTarget(
+                current.Element,
+                current.Snapshot,
+                null,
+                Describe(current.Snapshot),
+                BuildResolution(descriptor, current.Snapshot, null));
         }
 
         if (descriptor.Coordinates is not null)
         {
-            return new ResolvedTarget(null, null, descriptor.Coordinates, descriptor.Describe());
+            return new ResolvedTarget(
+                null,
+                null,
+                descriptor.Coordinates,
+                descriptor.Describe(),
+                BuildResolution(descriptor, null, descriptor.Coordinates));
         }
 
         throw new ComputerUseException("TARGET_REQUIRED", $"{objectName} must identify an element or coordinate.");
@@ -298,15 +344,58 @@ internal sealed class ActionExecutor
         throw new ComputerUseException("TARGET_REQUIRED", "An element or coordinate target is required.");
     }
 
-    private static ActionRecord Succeeded(string type, ResolvedTarget target, string message)
+    private static ActionExecutionResult Succeeded(string type, ResolvedTarget target, string message)
     {
-        return new ActionRecord
+        return new ActionExecutionResult(
+            new ActionRecord
+            {
+                Type = type,
+                Success = true,
+                Target = target.Label,
+                Message = message
+            },
+            target.Resolution,
+            true);
+    }
+
+    private static JsonObject BuildResolution(
+        TargetDescriptor descriptor,
+        UiElementSnapshot? snapshot,
+        CoordinateTarget? coordinates)
+    {
+        var method = descriptor.ElementId is not null
+            ? "element_id"
+            : descriptor.AutomationId is not null
+                ? "automation_id"
+                : descriptor.HasSelector
+                    ? "semantic_selector"
+                    : coordinates is not null
+                        ? "coordinate"
+                        : "target";
+        var result = new JsonObject
         {
-            Type = type,
-            Success = true,
-            Target = target.Label,
-            Message = message
+            ["method"] = method,
+            ["label"] = snapshot is not null
+                ? Describe(snapshot)
+                : coordinates?.Describe() ?? descriptor.Describe()
         };
+
+        if (snapshot is not null)
+        {
+            result["element_id"] = snapshot.Id;
+            result["name"] = snapshot.Name;
+            result["role"] = snapshot.Role;
+            result["automation_id"] = snapshot.AutomationId;
+        }
+
+        if (coordinates is { } point)
+        {
+            result["x"] = point.X;
+            result["y"] = point.Y;
+            result["coordinate_space"] = CoordinateSpaceParser.ToWireName(point.Space);
+        }
+
+        return result;
     }
 
     private static string Describe(UiElementSnapshot element)
@@ -373,12 +462,14 @@ internal sealed class ActionExecutor
             AutomationElement? element,
             UiElementSnapshot? snapshot,
             CoordinateTarget? coordinates,
-            string? label)
+            string? label,
+            JsonNode? resolution)
         {
             Element = element;
             Snapshot = snapshot;
             Coordinates = coordinates;
             Label = label;
+            Resolution = resolution;
         }
 
         public AutomationElement? Element { get; }
@@ -388,6 +479,8 @@ internal sealed class ActionExecutor
         public CoordinateTarget? Coordinates { get; }
 
         public string? Label { get; }
+
+        public JsonNode? Resolution { get; }
     }
 
 }

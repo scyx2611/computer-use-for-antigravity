@@ -7,7 +7,9 @@ internal static class Program
         ("coordinate spaces", CoordinateTransformTests.Run),
         ("target resolution", TargetResolverTests.Run),
         ("capture backend chain", CaptureBackendTests.Run),
-        ("state expiry and drift", StateManagerTests.Run)
+        ("state expiry and drift", StateManagerTests.Run),
+        ("postconditions", PostconditionTests.Run),
+        ("workflow runner", WorkflowRunnerTests.Run)
     ];
 
     public static int Main()

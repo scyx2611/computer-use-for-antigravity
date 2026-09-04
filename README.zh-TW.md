@@ -15,9 +15,10 @@ Antigravity -> MCP stdio -> TypeScript bridge -> JSONL -> 常駐 .NET runtime
                                                        -> WGC -> PrintWindow -> BitBlt
 ```
 
-## 狀態：v0.2 — Reliable Capture & Targeting
+## 狀態：v0.3 — Reliable Workflow Execution
 
-這個版本保留原有六個 MCP tools，專注在更可靠的觀察與目標解析：
+這個版本保留原有六個 MCP tools，建立在 v0.2 的 capture 與 target 保證上，
+專注於可靠的 workflow 執行：
 
 - Windows Graphics Capture 是主要截圖 backend。
 - 擷取失敗時依序 fallback 到 `PrintWindow`、`BitBlt`。
@@ -31,6 +32,14 @@ Antigravity -> MCP stdio -> TypeScript bridge -> JSONL -> 常駐 .NET runtime
 - `observe.coordinate_spaces` 明確標示截圖像素是 `window` 座標，而 UI Automation
   元素 bounds 是 `screen` 座標。
 - 原生程序仍是常駐 JSONL，公開的六個 MCP tool 名稱不變。
+- computer_perform 支援確定性的 action postcondition，包括元素存在/不存在、
+  enabled 狀態、精確 value、視窗標題包含文字、UI changed 與 UI stable。
+- 每個 action 可用 retry.max_attempts 與 retry.delay_ms 設定有界重試。預設只執行
+  一次；若尚未確認輸入已執行，runtime 會自動做一次安全的 stale re-observe。
+- computer_perform 回傳精簡的 execution_trace，包含 requested target、解析方式、
+  state/screenshot hash、capture backend、verification、retry reason、耗時與最後狀態。
+- Workflow 失敗會保留穩定 error code，並附上失敗步驟、attempt、是否已執行 action、
+  最後 observation 摘要、verification 與 trace。
 
 執行環境不會自行提升權限。如果能檢查目標程序的 token，對提升權限的目標會回傳
 `TARGET_ELEVATED`。
@@ -152,15 +161,55 @@ base64 PNG 資料放在原生回應中；MCP bridge 會將它回傳為 MCP image
 語意目標（`name`、`role`、`automation_id`）；執行環境會確定性解析目標、拒絕歧義
 匹配，並在每個操作之間重新觀察。
 
-## v0.2 限制
+Action 可以直接驗證結果，不使用影像辨識或 LLM：
+
+    {
+      "window_id": "123456",
+      "actions": [
+        {
+          "type": "click",
+          "target": { "name": "Settings", "role": "Button" },
+          "expect": {
+            "element": { "name": "Settings", "role": "Window" },
+            "ui_stable": true
+          },
+          "retry": { "max_attempts": 2, "delay_ms": 150 }
+        },
+        {
+          "type": "set_value",
+          "target": { "automation_id": "modelSelector" },
+          "value": "Gemini",
+          "expect": {
+            "value": {
+              "target": { "automation_id": "modelSelector" },
+              "equals": "Gemini"
+            }
+          }
+        }
+      ],
+      "verify": true
+    }
+
+Retry 有界且 fail closed。computer_perform 內部會重新 observe、重新 resolve stale
+state；computer_act 維持明確的 state-bound 行為。歧義目標絕不直接取第一個候選，
+TARGET_ELEVATED 絕不 retry。輸入已執行後，postcondition/stability retry 只允許
+具 idempotent 性質的 set_value 與 wait；click、文字輸入等 action 不會盲目重做。
+
+支援的 postcondition key 是 element、element_absent、element_enabled、
+element_disabled、value、window_title_contains、ui_changed 與 ui_stable。
+execution_trace 刻意保持精簡，不會在每個 attempt 重複整棵 UI tree。
+
+## v0.3 限制
 
 Windows Graphics Capture 是 best-effort：在不支援的 Windows/graphics 環境、受保護
 surface、最小化視窗、遠端工作階段或部分 GPU 應用程式上可能無法使用；回應會暴露
 失敗原因與 fallback 路徑。WGC 實作使用 Windows SDK Direct3D 11 interop，目前以同步
 方式讀回 BGRA8 frame。
 
-這個版本不加入 Browser/CDP、OCR、policy engine、新 MCP tools，也不支援 macOS/Linux。
-多螢幕邊界案例、更完整的拖曳/捲動驗證與額外 capture 最佳化留待後續版本。
+這個版本不加入 Browser/CDP、OCR、policy engine、新 MCP tools、LLM planning，也不支援
+macOS/Linux。多螢幕邊界案例、更完整的拖曳/捲動 postcondition 與額外 capture 最佳化
+留待後續版本。除非實際存在安全的 elevated GUI fixture，否則 TARGET_ELEVATED host
+acceptance 仍保持未驗證。
 
 WGC API 流程依循 Microsoft 的
 [Windows Graphics Capture 文件](https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture)、
