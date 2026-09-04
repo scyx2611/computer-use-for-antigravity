@@ -100,6 +100,9 @@ undoes the test input. It closes only the window/process it started. A host
 plugin invocation is a separate acceptance gate; this script does not prove
 that Antigravity has reloaded the global plugin.
 
+For the repeatable real-host checklist, see
+[`docs/host-acceptance.md`](./docs/host-acceptance.md).
+
 ## Install globally
 
 After building, install the plugin for the current Windows user:

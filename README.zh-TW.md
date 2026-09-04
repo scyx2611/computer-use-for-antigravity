@@ -92,6 +92,9 @@ mcp/dist/index.js
 刷新 state，最後復原測試輸入；清理時只關閉自己啟動的視窗/程序。Host plugin 的實際
 調用是另一個 acceptance gate；這個腳本不代表 Antigravity 已重新載入全域 plugin。
 
+可重複執行的真實 Host 驗收 checklist 請見
+[`docs/host-acceptance.md`](./docs/host-acceptance.md)。
+
 ## 全域安裝
 
 建置完成後，為目前的 Windows 使用者安裝 plugin：
