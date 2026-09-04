@@ -1,6 +1,12 @@
 # Computer Use for Antigravity
 
+[English](README.md) · [繁體中文](README.zh-TW.md)
+
 Windows-only native computer-use runtime for Antigravity.
+
+The user-facing product name is **Computer Use for Antigravity**. The plugin
+identifier is `computer-use-for-antigravity`, while the MCP server key remains
+`computer-use` for compatibility.
 
 Computer Use for Antigravity keeps the model-facing surface small and moves fragile desktop
 interaction into a deterministic runtime:
@@ -41,7 +47,7 @@ dotnet build .\native\ComputerUse.Native.csproj -c Release
 dotnet publish .\native\ComputerUse.Native.csproj -c Release -r win-x64 --self-contained false -o .\dist\native
 
 Push-Location .\mcp
-npm install
+npm ci
 npm run build
 Pop-Location
 ```
