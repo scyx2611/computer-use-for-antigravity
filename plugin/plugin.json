@@ -1,0 +1,5 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "computer-use-for-antigravity",
+  "description": "Windows desktop control for Antigravity via MCP"
+}

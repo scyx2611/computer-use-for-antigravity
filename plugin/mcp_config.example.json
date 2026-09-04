@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "computer-use": {
+      "command": "node",
+      "args": [
+        "<REPOSITORY_ROOT>/mcp/dist/index.js"
+      ],
+      "env": {
+        "COMPUTER_USE_NATIVE": "<REPOSITORY_ROOT>/dist/native/ComputerUse.Native.exe"
+      }
+    }
+  }
+}

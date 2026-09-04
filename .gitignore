@@ -1,0 +1,11 @@
+.playwright-cli/
+
+native/bin/
+native/obj/
+native/publish/
+
+mcp/node_modules/
+mcp/dist/
+mcp/.tsbuildinfo
+
+dist/
