@@ -1,17 +1,18 @@
 # Antigravity Host Acceptance
 
 This checklist validates the installed global `computer-use` plugin inside a
-real Antigravity Agent task. It is a host-level gate for v0.2 plus the v0.3
-workflow acceptance cases, and is separate from the native unit tests, MCP
-handshake, and local smoke test. It documents host acceptance; it does not
-define or implement the runtime.
+real Antigravity Agent task. It is a host-level gate for v0.2, v0.3, and the
+v0.4 Phase 2 browser acceptance cases, and is separate from the native unit
+tests, MCP handshake, and local smoke test. It documents host acceptance; it
+does not define or implement the runtime.
 
 ## 驗收目的
 
 這份 checklist 驗證全域 `computer-use` plugin 是否真的由 Antigravity
 Host 載入，並能在實際 Agent 任務中調用 Computer Use MCP。它包含 v0.2
-Host-level gate 與 v0.3 workflow 驗收案例，並與 native unit tests、MCP
-handshake、local smoke test 分開計算；文件只描述 Host 驗收，不實作 runtime。
+Host-level gate、v0.3 workflow 與 v0.4 Phase 2 browser 驗收案例，並與
+native unit tests、MCP handshake、local smoke test 分開計算；文件只描述
+Host 驗收，不實作 runtime。
 
 ## Preconditions / 前置條件
 
@@ -157,22 +158,49 @@ duplicate fixture, and clean process/profile teardown. They are native
 integration evidence only; they do not prove that Antigravity has loaded this
 branch.
 
-For a future real Host check, install the Phase 2 build only after the direct
-tests pass, restart Antigravity, and run this in a fresh Agent task without a
-subagent. Keep this as a separate gate:
+### Recorded v0.4 Phase 2 Host acceptance / 實際紀錄
 
-```text
-使用 Computer Use 的 managed ephemeral Chrome 開啟本地測試頁，先 observe，
-再以 semantic target 執行 set_value、type_text、click、press_key Enter、
-scroll 與 navigate；確認回報 interaction.backend=browser_cdp、
-capture.backend=cdp_page_capture，並確認導航後使用新的 state_id。
-完成後回報實際 computer_launch、computer_observe、computer_act 與
-computer_perform tool trace。
-```
+Date: 2026-09-04
+Antigravity: 2.12.0
+Checkpoint commit: `2c38f94`
+Native configured in global MCP: `dist/native-v0.4-phase2/ComputerUse.Native.exe`
 
-Record Host discovery and the actual tool trace separately. Until that task is
-run against the installed Phase 2 build, v0.4 Host loading and browser action
-execution are **NOT VERIFIED**.
+| Case | Result | Evidence |
+| --- | --- | --- |
+| Six tools discovered | PASS | Host UI showed all six: `computer_list_windows`, `computer_observe`, `computer_act`, `computer_perform`, `computer_wait_for`, `computer_launch`. |
+| `computer_perform` navigate schema | PASS | Host executed native `navigate` in the Edge workflow and URL-policy task. |
+| Chrome managed workflow | PASS | Managed Chrome used `browser_cdp` and `cdp_page_capture`; the form reached success with `Antigravity` / `test@example.com`. |
+| Edge managed workflow | PASS | Clean rerun used managed Edge with CDP capture; `EdgeClean` / `clean@example.com` reached success. |
+| Browser semantic routing | PASS | Browser actions reported browser surface with CDP backend and did not use desktop input fallback. |
+| semantic `click` | PASS | Chrome submit and the refined `Save Settings` target succeeded. |
+| `type_text` | PASS | Chrome and Edge Name/Email fields were filled. |
+| `set_value` | PASS | Chrome Name became `SetValueAcceptance`. |
+| key input | PASS | Managed browser Enter action was accepted and submitted the controlled flow. |
+| scroll | PASS | The workflow scrolled to the Success heading after navigation. |
+| navigate | PASS | Edge workflow and URL-policy task both executed browser navigation. |
+| navigation state replacement | PASS | The old document state was rejected after navigation; the new document was observed. |
+| `computer_act` stale rejection | PASS | Reusing the old browser state returned `STALE_BROWSER_STATE` with `action_executed=false`. |
+| `computer_perform` stale recovery | PASS | A single Continue-to-Success workflow re-observed and re-resolved after document replacement. |
+| `AMBIGUOUS_TARGET` fail-closed | PASS | Duplicate `Save` candidates returned with score `1250`; no action or fallback executed. `Save Settings` succeeded only after refinement. |
+| unmanaged browser not attached | PASS | Ordinary Chrome was reported `browser_detected=true`, `managed=false`, with desktop/UIA/WGC and no CDP attach. |
+| URL policy | PASS | `http://localhost...`, `https://...`, and `about:blank` were accepted; `javascript:alert(1)` returned `UNSUPPORTED_URL_SCHEME` before navigation. |
+| arbitrary JS/CDP exposed | NO | No arbitrary runtime JavaScript evaluation or arbitrary CDP command was exposed or executed. |
+| SendInput browser fallback | NO | Browser semantic actions stayed on the CDP path. |
+| profile/process cleanup | PASS | Managed browser processes and `session-*` profile directories were zero after cleanup; fixture port `54123` was released. |
+| `TARGET_ELEVATED` | NOT RUN | No safe elevated fixture was available. |
+
+Notes:
+
+- `STALE_BROWSER_STATE` is the browser-specific code observed where the
+  generic acceptance label says `STALE_STATE`; the explicit stale rejection
+  and fail-closed behavior were both confirmed.
+- One earlier clean Edge Host click returned transient `CDP_TIMEOUT` with
+  `action_executed=false`. After a full Host/MCP restart, the clean rerun of
+  the same workflow passed.
+- The first non-clean Edge task performed auxiliary target-discovery searches
+  while resolving an existing Edge window. The final clean rerun used only
+  the specified Computer Use calls.
+
 An ordinary Chrome/Edge opened outside the runtime must remain unmanaged and
 must not be attached. `TARGET_ELEVATED` remains `NOT RUN` unless a safe fixture
 exists.
