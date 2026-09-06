@@ -56,11 +56,12 @@ internal sealed class CdpEndpointClient : IDisposable
 
     public string DebugEndpoint => $"127.0.0.1:{Port}";
 
-    public IReadOnlyList<CdpTargetDescriptor> ListPageTargets()
+    public IReadOnlyList<CdpTargetDescriptor> ListPageTargets(int timeoutMilliseconds = 2_000)
     {
         try
         {
-            var json = http.GetStringAsync(listUri).GetAwaiter().GetResult();
+            using var cancellation = new CancellationTokenSource(timeoutMilliseconds);
+            var json = http.GetStringAsync(listUri, cancellation.Token).GetAwaiter().GetResult();
             var targets = JsonSerializer.Deserialize<List<CdpTargetDescriptor>>(json, SerializerOptions);
             if (targets is null)
             {
@@ -87,7 +88,12 @@ internal sealed class CdpEndpointClient : IDisposable
         {
             throw new ComputerUseException(
                 "CDP_TIMEOUT",
-                $"Timed out reading the Chromium target list: {exception.Message}");
+                $"Timed out reading the Chromium target list: {exception.Message}",
+                new JsonObject
+                {
+                    ["operation"] = "list_page_targets",
+                    ["command_sent"] = false
+                });
         }
         catch (HttpRequestException exception)
         {
@@ -153,7 +159,12 @@ internal sealed class CdpConnection : IDisposable
             socket.Dispose();
             throw new ComputerUseException(
                 "CDP_TIMEOUT",
-                $"Timed out connecting to the managed browser CDP target: {exception.Message}");
+                $"Timed out connecting to the managed browser CDP target: {exception.Message}",
+                new JsonObject
+                {
+                    ["operation"] = "connect",
+                    ["command_sent"] = false
+                });
         }
         catch (Exception exception) when (exception is WebSocketException or InvalidOperationException)
         {
@@ -317,7 +328,13 @@ internal sealed class CdpConnection : IDisposable
             {
                 throw new ComputerUseException(
                     "BROWSER_SESSION_CLOSED",
-                    "The managed browser CDP connection is closed.");
+                    "The managed browser CDP connection is closed.",
+                    new JsonObject
+                    {
+                        ["method"] = method,
+                        ["command_sent"] = false,
+                        ["socket_state"] = socket.State.ToString()
+                    });
             }
 
             var id = ++nextId;
@@ -332,6 +349,7 @@ internal sealed class CdpConnection : IDisposable
             }
 
             var payload = Encoding.UTF8.GetBytes(request.ToJsonString());
+            var commandSent = false;
             try
             {
                 using var cancellation = new CancellationTokenSource(timeoutMilliseconds);
@@ -340,6 +358,7 @@ internal sealed class CdpConnection : IDisposable
                     WebSocketMessageType.Text,
                     endOfMessage: true,
                     cancellation.Token).GetAwaiter().GetResult();
+                commandSent = true;
 
                 while (true)
                 {
@@ -348,7 +367,13 @@ internal sealed class CdpConnection : IDisposable
                     {
                         throw new ComputerUseException(
                             "BROWSER_SESSION_CLOSED",
-                            "The managed browser closed its CDP target connection.");
+                            "The managed browser closed its CDP target connection.",
+                            new JsonObject
+                            {
+                                ["method"] = method,
+                                ["command_sent"] = commandSent,
+                                ["socket_state"] = socket.State.ToString()
+                            });
                     }
 
                     if (!TryReadMessageId(message, out var responseId) || responseId != id)
@@ -387,19 +412,37 @@ internal sealed class CdpConnection : IDisposable
             {
                 throw new ComputerUseException(
                     "CDP_TIMEOUT",
-                    $"CDP command '{method}' timed out after {timeoutMilliseconds} ms: {exception.Message}");
+                    $"CDP command '{method}' timed out after {timeoutMilliseconds} ms: {exception.Message}",
+                    new JsonObject
+                    {
+                        ["method"] = method,
+                        ["command_sent"] = commandSent,
+                        ["socket_state"] = socket.State.ToString()
+                    });
             }
             catch (WebSocketException exception)
             {
                 throw new ComputerUseException(
                     "BROWSER_SESSION_CLOSED",
-                    $"CDP command '{method}' could not use the browser connection: {exception.Message}");
+                    $"CDP command '{method}' could not use the browser connection: {exception.Message}",
+                    new JsonObject
+                    {
+                        ["method"] = method,
+                        ["command_sent"] = commandSent,
+                        ["socket_state"] = socket.State.ToString()
+                    });
             }
             catch (InvalidOperationException exception)
             {
                 throw new ComputerUseException(
                     "BROWSER_SESSION_CLOSED",
-                    $"CDP command '{method}' could not use the browser connection: {exception.Message}");
+                    $"CDP command '{method}' could not use the browser connection: {exception.Message}",
+                    new JsonObject
+                    {
+                        ["method"] = method,
+                        ["command_sent"] = commandSent,
+                        ["socket_state"] = socket.State.ToString()
+                    });
             }
         }
     }

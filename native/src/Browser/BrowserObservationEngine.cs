@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -37,8 +38,14 @@ internal sealed class BrowserObservationEngine
         var layout = targetContext.Connection.GetLayoutMetrics();
         var viewport = ReadViewport(layout);
         var document = targetContext.Connection.GetDocument();
+        var documentNodeId = ReadDocumentNodeId(document);
+        session.UpdateDocumentNode(documentNodeId);
         var accessibility = targetContext.Connection.GetAccessibilityTree();
         var lifecycle = ReadLifecycleStability(targetContext.Connection, accessibility);
+        var semanticSignature = ComputeSemanticSignature(
+            targetContext.Target.Url,
+            targetContext.Target.Title,
+            accessibility);
         var elementBuild = BuildElements(
             targetContext.Connection,
             accessibility,
@@ -66,19 +73,17 @@ internal sealed class BrowserObservationEngine
                 Title = targetContext.Target.Title,
                 Viewport = viewport,
                 Lifecycle = lifecycle,
+                NavigationComplete = string.Equals(lifecycle, "stable", StringComparison.Ordinal),
                 DocumentGeneration = session.DocumentGeneration,
                 LoaderId = session.LoaderId,
                 Tabs = targetContext.Tabs.Select(ToTab).ToArray()
             },
             Elements = elements,
             ElementHandles = elementBuild.Handles,
-            DocumentNodeId = ReadDocumentNodeId(document),
+            DocumentNodeId = documentNodeId,
             DocumentGeneration = session.DocumentGeneration,
             LoaderId = session.LoaderId,
-            SemanticSignature = ComputeSemanticSignature(
-                targetContext.Target.Url,
-                targetContext.Target.Title,
-                elements),
+            SemanticSignature = semanticSignature,
             Screenshot = screenshot,
             ScreenshotCoordinateSpace = screenshot.Diagnostics.Backend == "cdp_page_capture"
                 ? "viewport"
@@ -86,14 +91,59 @@ internal sealed class BrowserObservationEngine
         };
     }
 
+    internal BrowserStabilitySample ProbeStability(
+        ManagedBrowserSession session,
+        int timeoutMilliseconds = 5_000)
+    {
+        var deadline = Stopwatch.GetTimestamp()
+            + (long)(timeoutMilliseconds * (double)Stopwatch.Frequency / 1000.0);
+        var targetContext = session.PrepareTarget(RemainingMilliseconds(deadline));
+        var document = targetContext.Connection.GetDocument(RemainingMilliseconds(deadline));
+        var documentNodeId = ReadDocumentNodeId(document);
+        session.UpdateDocumentNode(documentNodeId);
+        var accessibility = targetContext.Connection.GetAccessibilityTree(RemainingMilliseconds(deadline));
+        if (documentNodeId is null
+            || accessibility["nodes"] is not JsonArray)
+        {
+            throw new ComputerUseException(
+                "BROWSER_DOCUMENT_NOT_READY",
+                "The managed browser document or accessibility tree is not ready.",
+                new JsonObject
+                {
+                    ["target_id"] = targetContext.Target.Id,
+                    ["url"] = targetContext.Target.Url
+                });
+        }
+
+        return new BrowserStabilitySample
+        {
+            TargetId = targetContext.Target.Id,
+            Url = targetContext.Target.Url,
+            Title = targetContext.Target.Title,
+            DocumentGeneration = session.DocumentGeneration,
+            LoaderId = session.LoaderId,
+            DocumentNodeId = documentNodeId,
+            SemanticSignature = ComputeSemanticSignature(
+                targetContext.Target.Url,
+                targetContext.Target.Title,
+                accessibility)
+        };
+    }
+
+    private static int RemainingMilliseconds(long deadline)
+    {
+        var remaining = (deadline - Stopwatch.GetTimestamp()) * 1000.0 / Stopwatch.Frequency;
+        return remaining <= 0 ? 1 : (int)Math.Ceiling(remaining);
+    }
+
     private static string ReadLifecycleStability(CdpConnection connection, JsonObject initialAccessibility)
     {
-        // This is intentionally a small bounded probe for the spike. Full
-        // navigation/lifecycle event tracking belongs to the browser workflow
-        // milestone and must not be inferred from a single screenshot.
-        Thread.Sleep(100);
         try
         {
+            // Keep the one-shot observation probe distinct from the workflow
+            // stability loop below; this short gap prevents Chromium from
+            // coalescing the two expensive accessibility snapshots.
+            Thread.Sleep(100);
             var followUpAccessibility = connection.GetAccessibilityTree();
             return string.Equals(
                 ComputeJsonHash(initialAccessibility),
@@ -170,7 +220,7 @@ internal sealed class BrowserObservationEngine
                 Id = id,
                 Role = role,
                 Name = name,
-                AutomationId = string.Empty,
+                AutomationId = dom.Id ?? string.Empty,
                 Bounds = bounds,
                 IsEnabled = enabled,
                 Enabled = enabled,
@@ -216,7 +266,10 @@ internal sealed class BrowserObservationEngine
     private static int? ReadDocumentNodeId(JsonObject document)
     {
         return document["root"] is JsonObject root
-            ? ReadInt(root["nodeId"])
+            // CDP nodeId values are connection-scoped and may be refreshed by
+            // DOM.getDocument. The backend node id is the stable document
+            // identity we can compare across observations.
+            ? ReadInt(root["backendNodeId"])
             : null;
     }
 
@@ -283,25 +336,35 @@ internal sealed class BrowserObservationEngine
     private static string ComputeSemanticSignature(
         string url,
         string title,
-        IReadOnlyList<UiElementSnapshot> elements)
+        JsonObject accessibility)
     {
         var builder = new StringBuilder()
             .Append(url)
             .Append('\u001f')
             .Append(title)
             .Append('\u001e');
-        foreach (var element in elements)
+        if (accessibility["nodes"] is JsonArray nodes)
         {
-            builder.Append(element.Role)
-                .Append('\u001f')
-                .Append(element.Name)
-                .Append('\u001f')
-                .Append(element.Value ?? string.Empty)
-                .Append('\u001f')
-                .Append(element.IsEnabled)
-                .Append('\u001f')
-                .Append(string.Join(',', element.Bounds))
-                .Append('\u001e');
+            foreach (var node in nodes.OfType<JsonObject>())
+            {
+                if (ReadBool(node, "ignored", defaultValue: true))
+                {
+                    continue;
+                }
+
+                builder.Append(ReadRemoteValue(node["role"]) ?? string.Empty)
+                    .Append('\u001f')
+                    .Append(ReadRemoteValue(node["name"]) ?? string.Empty)
+                    .Append('\u001f')
+                    .Append(ReadRemoteValue(node["value"]) ?? string.Empty)
+                    .Append('\u001f')
+                    .Append(ReadOptionalPropertyBool(node, "disabled") ?? false)
+                    .Append('\u001f')
+                    .Append(ReadOptionalPropertyBool(node, "checked") ?? false)
+                    .Append('\u001f')
+                    .Append(ReadOptionalPropertyBool(node, "selected") ?? false)
+                    .Append('\u001e');
+            }
         }
 
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));

@@ -21,17 +21,23 @@ internal sealed class ActionExecutionResult
 
 internal sealed class WorkflowObservation
 {
-    public WorkflowObservation(ObserveResult result, string? uiSignature = null)
+    public WorkflowObservation(
+        ObserveResult result,
+        string? uiSignature = null,
+        Func<JsonNode, UiElementSnapshot?>? elementResolver = null)
     {
         Result = result ?? throw new ArgumentNullException(nameof(result));
         UiSignature = string.IsNullOrWhiteSpace(uiSignature)
             ? UiStateSignature.Compute(result)
             : uiSignature;
+        ElementResolver = elementResolver;
     }
 
     public ObserveResult Result { get; }
 
     public string UiSignature { get; }
+
+    internal Func<JsonNode, UiElementSnapshot?>? ElementResolver { get; }
 }
 
 internal interface IWorkflowDriver
@@ -93,6 +99,40 @@ internal sealed class UiStabilityResult
     [JsonPropertyName("final_signature")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? FinalSignature { get; init; }
+
+    [JsonPropertyName("sample_count")]
+    public int SampleCount { get; init; }
+
+    [JsonPropertyName("quiet_samples")]
+    public int QuietSamples { get; init; }
+
+    [JsonPropertyName("navigation_occurred")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? NavigationOccurred { get; init; }
+
+    [JsonPropertyName("navigation_complete")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? NavigationComplete { get; init; }
+
+    [JsonPropertyName("document_generation_before")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DocumentGenerationBefore { get; init; }
+
+    [JsonPropertyName("document_generation_after")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DocumentGenerationAfter { get; init; }
+
+    [JsonPropertyName("url_before")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UrlBefore { get; init; }
+
+    [JsonPropertyName("url_after")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UrlAfter { get; init; }
+
+    [JsonPropertyName("last_transient_error_code")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LastTransientErrorCode { get; init; }
 
     [JsonIgnore]
     public bool IsStable => string.Equals(Status, "stable", StringComparison.Ordinal);
@@ -173,6 +213,31 @@ internal sealed class PostconditionCheck
     public string Message { get; init; } = string.Empty;
 }
 
+internal sealed class NavigationTrace
+{
+    [JsonPropertyName("occurred")]
+    public bool Occurred { get; init; }
+
+    [JsonPropertyName("navigation_complete")]
+    public bool Complete { get; init; }
+
+    [JsonPropertyName("url_before")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UrlBefore { get; init; }
+
+    [JsonPropertyName("url_after")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UrlAfter { get; init; }
+
+    [JsonPropertyName("document_generation_before")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DocumentGenerationBefore { get; init; }
+
+    [JsonPropertyName("document_generation_after")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DocumentGenerationAfter { get; init; }
+}
+
 internal sealed class ExecutionTraceEntry
 {
     [JsonPropertyName("step_index")]
@@ -180,6 +245,14 @@ internal sealed class ExecutionTraceEntry
 
     [JsonPropertyName("action_type")]
     public string ActionType { get; init; } = string.Empty;
+
+    [JsonPropertyName("surface")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Surface { get; init; }
+
+    [JsonPropertyName("backend")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Backend { get; init; }
 
     [JsonPropertyName("attempt")]
     public int Attempt { get; init; }
@@ -220,6 +293,14 @@ internal sealed class ExecutionTraceEntry
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public PostconditionVerification? Verification { get; init; }
 
+    [JsonPropertyName("stability")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UiStabilityResult? Stability { get; init; }
+
+    [JsonPropertyName("navigation")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public NavigationTrace? Navigation { get; init; }
+
     [JsonPropertyName("retry_reason")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RetryReason { get; init; }
@@ -232,6 +313,9 @@ internal sealed class ExecutionTraceEntry
 
     [JsonPropertyName("action_executed")]
     public bool ActionExecuted { get; init; }
+
+    [JsonPropertyName("action_execution_status")]
+    public string ActionExecutionStatus { get; init; } = "not_executed";
 
     [JsonPropertyName("error_code")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

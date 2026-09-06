@@ -83,6 +83,10 @@ internal sealed class BrowserInfo
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? LoaderId { get; init; }
 
+    [JsonPropertyName("navigation_complete")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? NavigationComplete { get; init; }
+
     [JsonPropertyName("tabs")]
     public IReadOnlyList<BrowserTabSnapshot> Tabs { get; init; } = [];
 }
@@ -109,6 +113,33 @@ internal sealed class BrowserObservationData
     public ScreenshotResult Screenshot { get; init; } = new();
 
     public string ScreenshotCoordinateSpace { get; init; } = "viewport";
+}
+
+internal sealed class BrowserStabilitySample
+{
+    public string TargetId { get; init; } = string.Empty;
+
+    public string Url { get; init; } = string.Empty;
+
+    public string Title { get; init; } = string.Empty;
+
+    public string DocumentGeneration { get; init; } = string.Empty;
+
+    public string? LoaderId { get; init; }
+
+    public int? DocumentNodeId { get; init; }
+
+    public string SemanticSignature { get; init; } = string.Empty;
+
+    public string StabilityKey => string.Join(
+        '\u001f',
+        TargetId,
+        Url,
+        Title,
+        DocumentGeneration,
+        LoaderId ?? string.Empty,
+        DocumentNodeId?.ToString() ?? string.Empty,
+        SemanticSignature);
 }
 
 /// <summary>

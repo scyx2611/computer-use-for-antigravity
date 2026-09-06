@@ -19,10 +19,10 @@ Antigravity -> MCP stdio -> TypeScript bridge -> JSONL -> persistent .NET runtim
                                                        -> Managed Browser: CDP / Accessibility
 ```
 
-## Status: v0.4 Phase 2 — Semantic Browser Actions
+## Status: v0.4 Phase 3 — Reliable Browser Workflow
 
-This phase keeps the existing six MCP tools and extends the browser-aware
-runtime foundation from managed launch/observe to deterministic browser input:
+This phase keeps the existing six MCP tools and extends deterministic browser
+input into bounded, verifiable workflows:
 
 - Windows Graphics Capture is the primary screenshot backend.
 - Capture falls back in order to `PrintWindow`, then `BitBlt`.
@@ -38,18 +38,22 @@ runtime foundation from managed launch/observe to deterministic browser input:
   coordinates and UI Automation element bounds use `screen` coordinates.
 - The native process remains persistent JSONL, and the six public MCP names
   remain unchanged.
-- computer_perform accepts deterministic action postconditions such as element
-  existence/absence, enabled state, exact value, title containment, UI change,
-  and UI stability.
+- computer_perform accepts deterministic desktop and browser postconditions:
+  element existence/absence, enabled state, exact value/text, title or URL
+  matching, UI/page change, UI/page stability, and navigation completion.
 - Each action may opt into bounded retries with retry.max_attempts and
-  retry.delay_ms. The default is one attempt; automatic stale-state recovery
-  performs one safe re-observation when input has not been confirmed.
+  retry.delay_ms. The default is two attempts and the hard maximum is five;
+  automatic stale-state recovery re-observes and re-resolves before retrying.
+- Browser stability uses navigation lifecycle plus repeated semantic
+  Accessibility samples: 100 ms polling, three quiet samples, and a bounded
+  2,000 ms wait. It does not use arbitrary long sleeps.
 - computer_perform returns a compact execution_trace with the requested target,
-  resolution, state/screenshot hashes, capture backend, verification, retry
-  reason, duration, and final status.
+  surface/backend, resolution, state/screenshot hashes, capture backend,
+  navigation before/after, verification, retry reason, duration, action
+  execution status, and final status.
 - Workflow failures preserve stable error codes and include the failed step,
-  attempt, action-executed flag, last observation summary, verification, and
-  trace.
+  attempt, action-executed status, retry exhaustion, last observation/session
+  summary, verification, and trace.
 - `computer_launch` accepts `browser: { "mode": "managed", "profile":
   "ephemeral" }` for Chrome or Edge. The runtime creates a private profile,
   starts a local CDP endpoint, and returns a managed browser session.
@@ -126,11 +130,11 @@ dist/native/ComputerUse.Native.exe
 mcp/dist/index.js
 ```
 
-For v0.4 Phase 2, publish to a separate directory so an installed v0.3 runtime
+For v0.4 Phase 3, publish to a separate directory so an installed v0.3 runtime
 is not replaced while host acceptance remains a separate gate:
 
 ```powershell
-dotnet publish .\native\ComputerUse.Native.csproj -c Release -r win-x64 --self-contained false -o .\dist\native-v0.4-phase2
+dotnet publish .\native\ComputerUse.Native.csproj -c Release -r win-x64 --self-contained false -o .\dist\native-v0.4-phase3
 ```
 
 ## Windows smoke test
@@ -150,24 +154,28 @@ that Antigravity has reloaded the global plugin.
 For the repeatable real-host checklist, see
 [`docs/host-acceptance.md`](./docs/host-acceptance.md).
 
-## Managed browser Phase 2 smoke test
+## Managed browser Phase 3 smoke test
 
-The observation script remains available, and the Phase 2 integration script
-also launches only its own isolated Chrome or Edge profile. It checks semantic
-input, navigation, state invalidation, ambiguity handling, and workflow
-execution. It does not attach to or close an existing browser profile:
+The earlier observation/action scripts remain available. The Phase 3 workflow
+script launches only its own isolated Chrome or Edge profile and checks browser
+postconditions, navigation/stability metadata, execution trace, and workflow
+failure structure. None of these scripts attaches to or closes an existing
+browser profile:
 
 ```powershell
 .\scripts\browser-spike-test.ps1 -Browser chrome
 .\scripts\browser-spike-test.ps1 -Browser edge
 .\scripts\browser-action-test.ps1 -Browser chrome
 .\scripts\browser-action-test.ps1 -Browser edge
+.\scripts\browser-workflow-test.ps1 -Browser chrome
+.\scripts\browser-workflow-test.ps1 -Browser edge
 ```
 
 The observation script expects the spike publish output at
 `dist/native-v0.4-spike/ComputerUse.Native.exe`. Pass `-NativePath` to use a
 different build. The action script expects
-`dist/native-v0.4-phase2/ComputerUse.Native.exe`; pass `-NativePath` to use a
+`dist/native-v0.4-phase2/ComputerUse.Native.exe`; the workflow script expects
+`dist/native-v0.4-phase3/ComputerUse.Native.exe`. Pass `-NativePath` to use a
 different build. These are native integration checks, not proof that
 Antigravity has loaded the branch's plugin.
 
@@ -228,7 +236,7 @@ The public tools are:
 resolves them deterministically, refuses ambiguous matches, and re-observes
 between actions.
 
-To launch a managed browser for Phase 2:
+To launch a managed browser:
 
     {
       "path": "chrome.exe",
@@ -262,9 +270,9 @@ Managed browser actions use semantic targets from the latest observation:
 
 `computer_act` requires the current browser `state_id`. A navigation or
 document replacement makes the previous state invalid and must be followed by
-`computer_observe`. `computer_perform` owns a bounded observe/resolve cycle for
-ordinary browser stale-state recovery. Browser postconditions beyond the
-existing deterministic UI/state checks are not a Phase 2 feature.
+`computer_observe`. `computer_perform` owns the bounded observe/resolve cycle
+for ordinary browser stale-state recovery, then evaluates postconditions after
+each action.
 
 A workflow action can verify its result without image recognition or an LLM:
 
@@ -295,19 +303,49 @@ A workflow action can verify its result without image recognition or an LLM:
       "verify": true
     }
 
+For a managed browser, the same workflow can verify navigation and semantic
+page state without image matching:
+
+    {
+      "window_id": "browser-window-id",
+      "actions": [
+        {
+          "type": "click",
+          "target": { "test_id": "submit-button" },
+          "expect": {
+            "url_contains": "/success",
+            "title_contains": "Success",
+            "element_exists": { "role": "heading", "name": "Success" },
+            "text_contains": {
+              "target": { "role": "heading", "name": "Success" },
+              "contains": "uccess"
+            },
+            "page_changed": true,
+            "page_stable": true,
+            "navigation_complete": true
+          },
+          "retry": { "max_attempts": 2, "delay_ms": 150 }
+        }
+      ],
+      "verify": true
+    }
+
 Retries are bounded and fail closed. A stale state is re-observed and
 re-resolved inside computer_perform; computer_act keeps its explicit
 state-bound behavior. Ambiguous targets are never replaced by the first
-candidate, and TARGET_ELEVATED is never retried. After input has executed,
-postcondition/stability retries are limited to idempotent set_value and wait;
-actions such as click and text input are not blindly repeated.
+candidate, and TARGET_ELEVATED is never retried. Browser CDP timeouts are
+retryable for idempotent set_value and navigate; after a command may have been
+sent, non-idempotent input is not blindly repeated. Invalid actions, unsupported
+URL schemes, and unmanaged-browser attach refusal fail immediately.
 
 Supported postcondition keys are element, element_absent, element_enabled,
-element_disabled, value, window_title_contains, ui_changed, and ui_stable.
+element_exists, element_disabled, value, value_equals, text, text_equals,
+text_contains, window_title_contains, title_contains, url_equals, url_contains,
+ui_changed, ui_stable, page_changed, page_stable, and navigation_complete.
 The result's execution_trace is intentionally compact and does not duplicate
 the full UI tree for every attempt.
 
-## v0.4 Phase 2 limitations
+## v0.4 Phase 3 limitations
 
 Windows Graphics Capture is best-effort. It can be unavailable on unsupported
 Windows/graphics environments, protected surfaces, minimized windows, remote
@@ -316,16 +354,17 @@ fallback path. The WGC implementation uses the Windows SDK Direct3D 11
 interop path and currently reads back BGRA8 frames synchronously.
 
 Browser support is currently limited to managed Google Chrome and Microsoft
-Edge with the Phase 2 semantic actions listed above. Full browser postcondition
-semantics, tab lifecycle, iframe/OOPIF routing, popup management, shadow-DOM
-handling, and complete lifecycle tracking are future milestones. Browser
-screenshots fall back to the existing desktop capture chain only when a managed
-window is available; semantic browser actions never fall back to guessed
-coordinates. Browser Host acceptance remains unverified until a real
-Antigravity Agent task invokes this build; `TARGET_ELEVATED` remains unverified
-unless a safe elevated GUI fixture is actually available.
+Edge with the semantic actions and deterministic postconditions listed above.
+Multi-tab lifecycle, iframe/OOPIF routing, popup management, shadow-DOM
+handling, downloads/uploads, cookies/authentication, and full lifecycle
+tracking remain future milestones. Browser screenshots fall back to the
+existing desktop capture chain only when a managed window is available;
+semantic browser actions never fall back to guessed coordinates. Phase 3 Host
+acceptance is a separate gate and is not implied by native tests or smoke
+scripts; `TARGET_ELEVATED` remains unverified unless a safe elevated GUI
+fixture is actually available.
 
-Phase 2 does not add OCR, a policy engine, new MCP tools, LLM planning,
+Phase 3 does not add OCR, a policy engine, new MCP tools, LLM planning,
 Playwright, arbitrary CDP/JavaScript, cookie or storage access, or macOS/Linux
 support.
 

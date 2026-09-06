@@ -5,7 +5,7 @@ namespace ComputerUse.Native;
 internal sealed class RetryPolicy
 {
     public const int MaximumAttempts = 5;
-    private const int DefaultAttempts = 1;
+    private const int DefaultAttempts = 2;
     private const int DefaultDelayMilliseconds = 150;
 
     private RetryPolicy(int maxAttempts, int delayMilliseconds)
@@ -49,16 +49,22 @@ internal sealed class RetryPolicy
         throw new ComputerUseException("INVALID_ACTION", "type is required and must be a non-empty string.");
     }
 
-    public static bool IsRetryableBeforeExecution(string code, JsonObject action)
+    public static bool IsRetryableBeforeExecution(
+        string code,
+        JsonObject action,
+        JsonNode? failureDetails = null)
     {
         return code switch
         {
             "TARGET_NOT_FOUND" => true,
             "ELEMENT_NOT_FOUND" => true,
             "UIA_UNAVAILABLE" => true,
-            "AMBIGUOUS_TARGET" => true,
+            "STALE_STATE" => true,
             "STALE_BROWSER_STATE" => true,
             "BROWSER_FRAME_DETACHED" => true,
+            "BROWSER_DOCUMENT_NOT_READY" => true,
+            "BROWSER_TARGET_NOT_FOUND" => true,
+            "CDP_TIMEOUT" => IsSafeToRetryCdpTimeout(action, failureDetails),
             "ELEMENT_DISABLED" => HasElementEnabledExpectation(action),
             _ => false
         };
@@ -69,9 +75,27 @@ internal sealed class RetryPolicy
         return actionType switch
         {
             "set_value" => true,
+            "navigate" => true,
             "wait" => true,
             _ => false
         };
+    }
+
+    private static bool IsSafeToRetryCdpTimeout(JsonObject action, JsonNode? failureDetails)
+    {
+        var actionType = ReadActionType(action);
+        if (actionType is "set_value" or "navigate")
+        {
+            return true;
+        }
+
+        // A timeout before the command was sent is safe to retry for any
+        // action. Once a CDP input command was sent, non-idempotent input must
+        // fail closed because the browser may have acted without an ack.
+        return failureDetails is JsonObject details
+            && details["command_sent"] is JsonValue value
+            && value.TryGetValue<bool>(out var commandSent)
+            && !commandSent;
     }
 
     private static bool HasElementEnabledExpectation(JsonObject action)

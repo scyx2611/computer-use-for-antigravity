@@ -51,7 +51,7 @@ internal sealed class NativeRuntime : IDisposable
         return new JsonObject
         {
             ["name"] = "computer-use-native",
-            ["version"] = "0.4.0-phase2",
+            ["version"] = "0.4.0-phase3",
             ["platform"] = "windows",
             ["protocol"] = "jsonl"
         };
@@ -147,7 +147,7 @@ internal sealed class NativeRuntime : IDisposable
                     EnsureBrowserStateMatchesSession(state, browserSession);
                     return browserActions.Execute(browserSession.PrepareTarget(5_000), state, action);
                 },
-                waitForUiStable: observation => WaitForBrowserUiStable(hwnd, browserSession, observation.UiSignature));
+                waitForUiStable: observation => WaitForBrowserUiStable(browserSession, observation));
         }
         else
         {
@@ -477,7 +477,24 @@ internal sealed class NativeRuntime : IDisposable
         var state = states.Require(result.StateId);
         return new WorkflowObservation(
             result,
-            state.Browser?.SemanticSignature);
+            state.Browser?.SemanticSignature,
+            target => ResolveBrowserPostconditionElement(session, result.StateId, target));
+    }
+
+    private UiElementSnapshot? ResolveBrowserPostconditionElement(
+        ManagedBrowserSession session,
+        string stateId,
+        JsonNode target)
+    {
+        var state = states.Require(stateId);
+        if (state.Browser is null)
+        {
+            return null;
+        }
+
+        var targetContext = session.PrepareTarget(5_000);
+        EnsureBrowserStateMatchesSession(state, session);
+        return browserActions.ResolveForPostcondition(targetContext, state.Browser, target);
     }
 
     private BrowserTargetContext ValidateBrowserState(
@@ -551,70 +568,129 @@ internal sealed class NativeRuntime : IDisposable
     }
 
     private UiStabilityResult WaitForBrowserUiStable(
-        IntPtr hwnd,
         ManagedBrowserSession session,
-        string initialSignature)
+        WorkflowObservation before)
     {
-        const int timeoutMilliseconds = 2_500;
+        const int timeoutMilliseconds = 2_000;
         const int pollMilliseconds = 100;
-        const int stableSamplesRequired = 2;
+        const int stableSamplesRequired = 3;
         var start = Stopwatch.GetTimestamp();
         var deadline = start
             + (long)(timeoutMilliseconds * (double)Stopwatch.Frequency / 1000.0);
-        string? previous = null;
-        string? finalSignature = null;
-        var stableSamples = 0;
-        var changed = false;
+        BrowserStabilitySample? previous = null;
+        BrowserStabilitySample? finalSample = null;
+        var sampleCount = 0;
+        var quietSamples = 0;
+        string? lastTransientErrorCode = null;
 
-        while (Stopwatch.GetTimestamp() < deadline)
+        while (true)
         {
+            var remainingMilliseconds = RemainingMilliseconds(deadline);
+            if (remainingMilliseconds <= 0)
+            {
+                break;
+            }
+
             try
             {
-                var current = ObserveBrowserWorkflow(hwnd, session);
-                finalSignature = current.UiSignature;
-                changed |= !string.Equals(initialSignature, current.UiSignature, StringComparison.Ordinal);
-                if (string.Equals(previous, current.UiSignature, StringComparison.Ordinal))
+                var current = browserObservation.ProbeStability(
+                    session,
+                    Math.Min(5_000, remainingMilliseconds));
+                finalSample = current;
+                sampleCount++;
+                if (previous is not null
+                    && string.Equals(previous.StabilityKey, current.StabilityKey, StringComparison.Ordinal))
                 {
-                    stableSamples++;
+                    quietSamples++;
                 }
                 else
                 {
-                    stableSamples = 1;
-                    previous = current.UiSignature;
+                    quietSamples = 1;
+                    previous = current;
                 }
 
-                if (stableSamples >= stableSamplesRequired)
+                if (quietSamples >= stableSamplesRequired)
                 {
-                    return new UiStabilityResult
-                    {
-                        Status = "stable",
-                        Changed = changed,
-                        ElapsedMilliseconds = ElapsedMilliseconds(start),
-                        InitialSignature = initialSignature,
-                        FinalSignature = finalSignature
-                    };
+                    return BuildBrowserStabilityResult(
+                        before,
+                        finalSample,
+                        isStable: true,
+                        sampleCount,
+                        quietSamples,
+                        lastTransientErrorCode,
+                        start);
                 }
             }
             catch (ComputerUseException exception) when (
                 exception.Code is "STALE_BROWSER_STATE"
                     or "BROWSER_FRAME_DETACHED"
-                    or "CDP_TIMEOUT")
+                    or "CDP_TIMEOUT"
+                    or "BROWSER_DOCUMENT_NOT_READY"
+                    or "BROWSER_TARGET_NOT_FOUND")
             {
-                // Navigation and document replacement can briefly invalidate
-                // one observation. Keep polling within the bounded wait.
+                lastTransientErrorCode = exception.Code;
             }
 
-            Thread.Sleep(pollMilliseconds);
+            remainingMilliseconds = RemainingMilliseconds(deadline);
+            if (remainingMilliseconds <= 0)
+            {
+                break;
+            }
+
+            Thread.Sleep(Math.Min(pollMilliseconds, remainingMilliseconds));
         }
+
+        return BuildBrowserStabilityResult(
+            before,
+            finalSample,
+            isStable: false,
+            sampleCount,
+            quietSamples,
+            lastTransientErrorCode,
+            start);
+    }
+
+    private static UiStabilityResult BuildBrowserStabilityResult(
+        WorkflowObservation before,
+        BrowserStabilitySample? finalSample,
+        bool isStable,
+        int sampleCount,
+        int quietSamples,
+        string? lastTransientErrorCode,
+        long start)
+    {
+        var initialBrowser = before.Result.Browser;
+        var navigationOccurred = initialBrowser is not null
+            && finalSample is not null
+            && (!string.Equals(initialBrowser.TargetId, finalSample.TargetId, StringComparison.Ordinal)
+                || !string.Equals(initialBrowser.DocumentGeneration, finalSample.DocumentGeneration, StringComparison.Ordinal)
+                || !string.Equals(initialBrowser.Url, finalSample.Url, StringComparison.Ordinal));
+        var changed = finalSample is not null
+            && !string.Equals(before.UiSignature, finalSample.SemanticSignature, StringComparison.Ordinal);
 
         return new UiStabilityResult
         {
-            Status = "timeout",
+            Status = isStable ? "stable" : "timeout",
             Changed = changed,
             ElapsedMilliseconds = ElapsedMilliseconds(start),
-            InitialSignature = initialSignature,
-            FinalSignature = finalSignature
+            InitialSignature = before.UiSignature,
+            FinalSignature = finalSample?.SemanticSignature,
+            SampleCount = sampleCount,
+            QuietSamples = quietSamples,
+            NavigationOccurred = navigationOccurred,
+            NavigationComplete = isStable && finalSample is not null,
+            DocumentGenerationBefore = initialBrowser?.DocumentGeneration,
+            DocumentGenerationAfter = finalSample?.DocumentGeneration,
+            UrlBefore = initialBrowser?.Url,
+            UrlAfter = finalSample?.Url,
+            LastTransientErrorCode = lastTransientErrorCode
         };
+    }
+
+    private static int RemainingMilliseconds(long deadline)
+    {
+        var remaining = (deadline - Stopwatch.GetTimestamp()) * 1000.0 / Stopwatch.Frequency;
+        return remaining <= 0 ? 0 : (int)Math.Ceiling(remaining);
     }
 
     private UiStabilityResult WaitForUiStable(IntPtr hwnd, string initialSignature)
@@ -627,6 +703,7 @@ internal sealed class NativeRuntime : IDisposable
         string? previous = null;
         string? finalSignature = null;
         var stableSamples = 0;
+        var sampleCount = 0;
         var changed = false;
         var start = Stopwatch.GetTimestamp();
 
@@ -644,6 +721,7 @@ internal sealed class NativeRuntime : IDisposable
 
             if (current is not null)
             {
+                sampleCount++;
                 finalSignature = current;
                 changed |= !string.Equals(initialSignature, current, StringComparison.Ordinal);
                 if (string.Equals(previous, current, StringComparison.Ordinal))
@@ -664,7 +742,9 @@ internal sealed class NativeRuntime : IDisposable
                         Changed = changed,
                         ElapsedMilliseconds = ElapsedMilliseconds(start),
                         InitialSignature = initialSignature,
-                        FinalSignature = finalSignature
+                        FinalSignature = finalSignature,
+                        SampleCount = sampleCount,
+                        QuietSamples = stableSamples
                     };
                 }
             }
@@ -678,7 +758,9 @@ internal sealed class NativeRuntime : IDisposable
             Changed = changed,
             ElapsedMilliseconds = ElapsedMilliseconds(start),
             InitialSignature = initialSignature,
-            FinalSignature = finalSignature
+            FinalSignature = finalSignature,
+            SampleCount = sampleCount,
+            QuietSamples = stableSamples
         };
     }
 

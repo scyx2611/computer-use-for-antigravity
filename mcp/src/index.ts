@@ -232,9 +232,17 @@ const postconditionTargetOrWrapperSchema = z.union([
     })
     .passthrough(),
 ]);
+const textPostconditionSchema = z
+  .object({
+    target: postconditionTargetSchema,
+    equals: z.string().optional(),
+    contains: z.string().optional(),
+  })
+  .passthrough();
 const postconditionSchema = z
   .object({
     element: postconditionTargetOrWrapperSchema.optional(),
+    element_exists: postconditionTargetOrWrapperSchema.optional(),
     element_absent: postconditionTargetOrWrapperSchema.optional(),
     element_enabled: postconditionTargetOrWrapperSchema.optional(),
     element_disabled: postconditionTargetOrWrapperSchema.optional(),
@@ -245,9 +253,25 @@ const postconditionSchema = z
       })
       .passthrough()
       .optional(),
+    value_equals: z
+      .object({
+        target: postconditionTargetSchema,
+        equals: z.string(),
+      })
+      .passthrough()
+      .optional(),
+    text: textPostconditionSchema.optional(),
+    text_equals: textPostconditionSchema.optional(),
+    text_contains: textPostconditionSchema.optional(),
     window_title_contains: z.string().min(1).optional(),
+    title_contains: z.string().min(1).optional(),
+    url_equals: z.string().min(1).optional(),
+    url_contains: z.string().min(1).optional(),
     ui_changed: z.boolean().optional(),
     ui_stable: z.boolean().optional(),
+    page_changed: z.boolean().optional(),
+    page_stable: z.boolean().optional(),
+    navigation_complete: z.boolean().optional(),
   })
   .passthrough();
 
@@ -414,7 +438,7 @@ async function callTool(
 }
 
 function createServer(): McpServer {
-  const server = new McpServer({ name: "computer-use", version: "0.4.0-phase2" });
+  const server = new McpServer({ name: "computer-use", version: "0.4.0-phase3" });
 
   server.registerTool(
     "computer_list_windows",
@@ -453,7 +477,7 @@ function createServer(): McpServer {
     {
       title: "Perform Actions",
       description:
-        "Execute a bounded workflow with deterministic postconditions, retry/re-observe recovery, automatic desktop or managed-browser stale-state recovery, and a compact execution trace. Semantic ambiguity fails closed.",
+        "Execute a bounded desktop or managed-browser workflow with deterministic browser/desktop postconditions, quiet-sample stability checks, bounded transient retry/recovery, structured failures, and a compact execution trace. Semantic ambiguity and unsafe input fail closed.",
       inputSchema: performSchema,
     },
     async (args) => callTool("perform", args, true),

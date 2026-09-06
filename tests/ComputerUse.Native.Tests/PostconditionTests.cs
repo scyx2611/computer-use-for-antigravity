@@ -105,13 +105,19 @@ internal static class PostconditionTests
                 }),
             "element postconditions must reject coordinate targets");
         TestAssert.Equal("INVALID_POSTCONDITION", invalid.Code, "invalid postcondition error code");
+
+        BrowserConditionsUseUrlTextAndNavigationState();
     }
 
     internal static WorkflowObservation Observation(
         string stateId,
         string title,
         string screenshotHash,
-        IReadOnlyList<UiElementSnapshot> elements)
+        IReadOnlyList<UiElementSnapshot> elements,
+        BrowserInfo? browser = null,
+        string? uiSignature = null,
+        InteractionInfo? interaction = null,
+        string captureBackend = "windows_graphics_capture")
     {
         return new WorkflowObservation(
             new ObserveResult
@@ -127,16 +133,22 @@ internal static class PostconditionTests
                     Height = 300,
                     Pid = 99
                 },
+                Interaction = interaction ?? new InteractionInfo
+                {
+                    Surface = browser is null ? "desktop" : "browser",
+                    Backend = browser is null ? "uia" : "browser_cdp"
+                },
+                Browser = browser,
                 Elements = elements,
                 ScreenshotHash = screenshotHash,
                 Capture = new CaptureDiagnostics
                 {
-                    Backend = "windows_graphics_capture",
+                    Backend = captureBackend,
                     Width = 500,
                     Height = 300
                 }
             },
-            stateId);
+            uiSignature ?? stateId);
     }
 
     internal static UiElementSnapshot Element(
@@ -156,7 +168,114 @@ internal static class PostconditionTests
             Bounds = [id * 10, id * 10, 100, 30],
             IsEnabled = enabled,
             RuntimeId = $"runtime-{id}",
-            Value = value
+            Value = value,
+            Text = name
+        };
+    }
+
+    private static void BrowserConditionsUseUrlTextAndNavigationState()
+    {
+        var before = Observation(
+            "browser-before",
+            "Computer Use form",
+            "before-hash",
+            [
+                Element(1, "Name", "textbox", "name", true, null),
+                Element(2, "Submit", "button", "submit", true, null)
+            ],
+            browser: Browser("http://127.0.0.1:54123/form.html", "Computer Use form", "document-a"),
+            uiSignature: "semantic-a");
+        var after = Observation(
+            "browser-after",
+            "Computer Use success",
+            "after-hash",
+            [
+                Element(1, "Success", "heading", "", true, null),
+                Element(2, "Name", "textbox", "name", true, "Antigravity"),
+                Element(3, "Disabled", "button", "disabled", false, null)
+            ],
+            browser: Browser(
+                "http://127.0.0.1:54123/success.html?name=Antigravity",
+                "Computer Use success",
+                "document-b"),
+            uiSignature: "semantic-b",
+            captureBackend: "cdp_page_capture");
+        var stable = new UiStabilityResult
+        {
+            Status = "stable",
+            Changed = true,
+            SampleCount = 3,
+            QuietSamples = 3,
+            NavigationOccurred = true,
+            NavigationComplete = true
+        };
+
+        var verification = PostconditionEvaluator.Evaluate(
+            new JsonObject
+            {
+                ["url_equals"] = "http://127.0.0.1:54123/success.html?name=Antigravity",
+                ["url_contains"] = "/success.html",
+                ["title_contains"] = "success",
+                ["element_exists"] = new JsonObject { ["role"] = "heading", ["name"] = "Success" },
+                ["element_absent"] = new JsonObject { ["role"] = "button", ["name"] = "Submit" },
+                ["element_enabled"] = new JsonObject { ["role"] = "textbox", ["name"] = "Name" },
+                ["element_disabled"] = new JsonObject { ["role"] = "button", ["name"] = "Disabled" },
+                ["value_equals"] = new JsonObject
+                {
+                    ["target"] = new JsonObject { ["role"] = "textbox", ["name"] = "Name" },
+                    ["equals"] = "Antigravity"
+                },
+                ["text_equals"] = new JsonObject
+                {
+                    ["target"] = new JsonObject { ["role"] = "heading", ["name"] = "Success" },
+                    ["equals"] = "Success"
+                },
+                ["text_contains"] = new JsonObject
+                {
+                    ["target"] = new JsonObject { ["role"] = "heading", ["name"] = "Success" },
+                    ["contains"] = "ucc"
+                },
+                ["text"] = new JsonObject
+                {
+                    ["target"] = new JsonObject { ["role"] = "heading", ["name"] = "Success" },
+                    ["equals"] = "Success"
+                },
+                ["page_changed"] = true,
+                ["page_stable"] = true,
+                ["navigation_complete"] = true
+            },
+            before,
+            after,
+            stable);
+
+        TestAssert.True(verification.Passed, "browser URL, text, value, and navigation postconditions should pass");
+        TestAssert.Equal(14, verification.Checks.Count, "browser postcondition check count");
+
+        var failed = PostconditionEvaluator.Evaluate(
+            new JsonObject
+            {
+                ["url_contains"] = "/missing",
+                ["navigation_complete"] = false
+            },
+            before,
+            after,
+            stable);
+        TestAssert.True(!failed.Passed, "browser postcondition mismatch must fail");
+        TestAssert.Equal("POSTCONDITION_FAILED", failed.ErrorCode, "browser mismatch error code");
+    }
+
+    internal static BrowserInfo Browser(string url, string title, string documentGeneration)
+    {
+        return new BrowserInfo
+        {
+            SessionId = "session",
+            Browser = "chrome",
+            TargetId = "target",
+            Url = url,
+            Title = title,
+            DocumentGeneration = documentGeneration,
+            Lifecycle = "stable",
+            NavigationComplete = true
         };
     }
 }

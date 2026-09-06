@@ -7,6 +7,29 @@ internal sealed class BrowserActionExecutor
     private readonly BrowserElementResolver resolver = new();
     private readonly CdpInputEngine keyboard = new();
 
+    internal UiElementSnapshot? ResolveForPostcondition(
+        BrowserTargetContext targetContext,
+        BrowserStateMetadata state,
+        JsonNode targetNode)
+    {
+        var action = new JsonObject
+        {
+            ["target"] = targetNode.DeepClone()
+        };
+        var descriptor = TargetDescriptor.FromAction(action);
+        try
+        {
+            return resolver.Resolve(targetContext, state, descriptor, allowFocusedEditable: false)?.Element?.Snapshot;
+        }
+        catch (ComputerUseException exception) when (
+            exception.Code is "TARGET_NOT_FOUND"
+                or "ELEMENT_NOT_FOUND"
+                or "BROWSER_TARGET_NOT_FOUND")
+        {
+            return null;
+        }
+    }
+
     public ActionExecutionResult Execute(
         BrowserTargetContext targetContext,
         WindowState state,
@@ -55,7 +78,9 @@ internal sealed class BrowserActionExecutor
         var target = ResolveRequired(targetContext, state, descriptor, allowFocusedEditable: false, "click");
         var point = ScrollAndGetCenter(targetContext.Connection, target.Element!);
         EnsureEnabled(target.Element!);
-        targetContext.Connection.DispatchMouseEvent("mouseMoved", point.X, point.Y);
+        // A move is not required for a coordinate-resolved click and can race
+        // a page navigation triggered by the preceding workflow step. Keep
+        // the click to the minimal press/release pair.
         targetContext.Connection.DispatchMouseEvent("mousePressed", point.X, point.Y, "left", buttons: 1, clickCount: 1);
         targetContext.Connection.DispatchMouseEvent("mouseReleased", point.X, point.Y, "left", buttons: 0, clickCount: 1);
         AddPoint(target.Resolution, point);
@@ -318,7 +343,7 @@ internal sealed class BrowserActionExecutor
     {
         return new ComputerUseException(
             "UNSUPPORTED_BROWSER_ACTION",
-            $"Managed browser action '{type}' is not supported in v0.4 Phase 2.",
+            $"Managed browser action '{type}' is not supported in v0.4 Phase 3.",
             new JsonObject
             {
                 ["surface"] = "browser",

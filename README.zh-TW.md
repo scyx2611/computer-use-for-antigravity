@@ -17,10 +17,10 @@ Antigravity -> MCP stdio -> TypeScript bridge -> JSONL -> 常駐 .NET runtime
                                                        -> Managed Browser：CDP / Accessibility
 ```
 
-## 狀態：v0.4 Phase 2 — Semantic Browser Actions
+## 狀態：v0.4 Phase 3 — Reliable Browser Workflow
 
-這個階段保留原有六個 MCP tools，並在 managed launch/observe 基礎上加入
-確定性的 browser-native input：
+這個階段保留原有六個 MCP tools，並把確定性的 browser-native input 擴充成
+有界、可驗證的 workflow：
 
 - Windows Graphics Capture 是主要截圖 backend。
 - 擷取失敗時依序 fallback 到 `PrintWindow`、`BitBlt`。
@@ -34,14 +34,18 @@ Antigravity -> MCP stdio -> TypeScript bridge -> JSONL -> 常駐 .NET runtime
 - `observe.coordinate_spaces` 明確標示截圖像素是 `window` 座標，而 UI Automation
   元素 bounds 是 `screen` 座標。
 - 原生程序仍是常駐 JSONL，公開的六個 MCP tool 名稱不變。
-- computer_perform 支援確定性的 action postcondition，包括元素存在/不存在、
-  enabled 狀態、精確 value、視窗標題包含文字、UI changed 與 UI stable。
-- 每個 action 可用 retry.max_attempts 與 retry.delay_ms 設定有界重試。預設只執行
-  一次；若尚未確認輸入已執行，runtime 會自動做一次安全的 stale re-observe。
+- computer_perform 支援確定性的 desktop 與 browser postcondition，包括元素存在/不存在、
+  enabled 狀態、精確 value/text、標題或 URL 比對、UI/page changed、UI/page stable
+  與 navigation complete。
+- 每個 action 可用 retry.max_attempts 與 retry.delay_ms 設定有界重試。預設最多兩次，
+  上限為五次；若遇到 stale/document 狀態，runtime 會重新 observe 與 resolve 後再重試。
+- Browser stability 使用 navigation lifecycle 加上重複的 semantic Accessibility sample：
+  每 100ms polling、連續三個 quiet samples、最多等待 2,000ms，不依賴任意長時間 sleep。
 - computer_perform 回傳精簡的 execution_trace，包含 requested target、解析方式、
-  state/screenshot hash、capture backend、verification、retry reason、耗時與最後狀態。
+  surface/backend、state/screenshot hash、capture backend、navigation 前後、
+  verification、retry reason、耗時、action execution status 與最後狀態。
 - Workflow 失敗會保留穩定 error code，並附上失敗步驟、attempt、是否已執行 action、
-  最後 observation 摘要、verification 與 trace。
+  retry 是否耗盡、最後 observation/session 摘要、verification 與 trace。
 - `computer_launch` 支援對 Chrome 或 Edge 傳入
   `browser: { "mode": "managed", "profile": "ephemeral" }`。runtime 會建立
   私有 profile、啟動本機 CDP endpoint，並回傳 managed browser session。
@@ -112,11 +116,11 @@ dist/native/ComputerUse.Native.exe
 mcp/dist/index.js
 ```
 
-v0.4 Phase 2 建議 publish 到獨立目錄，避免 Host acceptance 尚未完成時覆蓋已安裝的
+v0.4 Phase 3 建議 publish 到獨立目錄，避免 Host acceptance 尚未完成時覆蓋已安裝的
  v0.3 runtime：
 
 ```powershell
-dotnet publish .\native\ComputerUse.Native.csproj -c Release -r win-x64 --self-contained false -o .\dist\native-v0.4-phase2
+dotnet publish .\native\ComputerUse.Native.csproj -c Release -r win-x64 --self-contained false -o .\dist\native-v0.4-phase3
 ```
 
 ## Windows 冒煙測試
@@ -134,23 +138,27 @@ dotnet publish .\native\ComputerUse.Native.csproj -c Release -r win-x64 --self-c
 可重複執行的真實 Host 驗收 checklist 請見
 [`docs/host-acceptance.md`](./docs/host-acceptance.md)。
 
-## Managed browser Phase 2 smoke test
+## Managed browser Phase 3 smoke test
 
-本地 integration script 會啟動 deterministic localhost fixture，只使用自己的隔離
-Chrome/Edge profile，檢查 semantic input、navigation、state invalidation、歧義處理與
-workflow；不會 attach 或關閉既有 browser：
+舊的 observation/action script 仍可使用；Phase 3 workflow script 會啟動自己的隔離
+Chrome/Edge profile，檢查 browser postcondition、navigation/stability metadata、
+execution trace 與 workflow failure structure。所有 script 都不會 attach 或關閉既有 browser：
 
 ```powershell
 .\scripts\browser-spike-test.ps1 -Browser chrome
 .\scripts\browser-spike-test.ps1 -Browser edge
 .\scripts\browser-action-test.ps1 -Browser chrome
 .\scripts\browser-action-test.ps1 -Browser edge
+.\scripts\browser-workflow-test.ps1 -Browser chrome
+.\scripts\browser-workflow-test.ps1 -Browser edge
 ```
 
 觀察腳本預期 native spike 位於
 `dist/native-v0.4-spike/ComputerUse.Native.exe`；也可用 `-NativePath` 指定其他
 build。action 腳本預期
 `dist/native-v0.4-phase2/ComputerUse.Native.exe`；也可用 `-NativePath` 指定其他
+build；workflow 腳本預期
+`dist/native-v0.4-phase3/ComputerUse.Native.exe`；也可用 `-NativePath` 指定其他
 build。PASS 只代表 native integration 通過，不代表 Antigravity 已載入這個 branch
 的 plugin。
 
@@ -211,7 +219,7 @@ base64 PNG 資料放在原生回應中；MCP bridge 會將它回傳為 MCP image
 語意目標（`name`、`role`、`automation_id`）；執行環境會確定性解析目標、拒絕歧義
 匹配，並在每個操作之間重新觀察。
 
-Phase 2 啟動 managed browser 的參數範例：
+啟動 managed browser 的參數範例：
 
     {
       "path": "chrome.exe",
@@ -244,8 +252,7 @@ Managed browser action 使用最新 observation 的 semantic target：
 
 `computer_act` 需要目前 browser `state_id`。導航或 document replacement 會使舊
 state 失效，之後必須重新 `computer_observe`。`computer_perform` 會為一般 browser
-stale state 管理有界的 observe/resolve 週期。Browser postcondition 的完整擴充不在
-Phase 2 範圍內。
+stale state 管理有界的 observe/resolve 週期，並在每個 action 後評估 postcondition。
 
 Action 可以直接驗證結果，不使用影像辨識或 LLM：
 
@@ -276,31 +283,62 @@ Action 可以直接驗證結果，不使用影像辨識或 LLM：
       "verify": true
     }
 
+對 managed browser 也可以用相同 workflow 驗證 navigation 與 semantic page state，
+不需要影像比對：
+
+    {
+      "window_id": "browser-window-id",
+      "actions": [
+        {
+          "type": "click",
+          "target": { "test_id": "submit-button" },
+          "expect": {
+            "url_contains": "/success",
+            "title_contains": "Success",
+            "element_exists": { "role": "heading", "name": "Success" },
+            "text_contains": {
+              "target": { "role": "heading", "name": "Success" },
+              "contains": "uccess"
+            },
+            "page_changed": true,
+            "page_stable": true,
+            "navigation_complete": true
+          },
+          "retry": { "max_attempts": 2, "delay_ms": 150 }
+        }
+      ],
+      "verify": true
+    }
+
 Retry 有界且 fail closed。computer_perform 內部會重新 observe、重新 resolve stale
 state；computer_act 維持明確的 state-bound 行為。歧義目標絕不直接取第一個候選，
-TARGET_ELEVATED 絕不 retry。輸入已執行後，postcondition/stability retry 只允許
-具 idempotent 性質的 set_value 與 wait；click、文字輸入等 action 不會盲目重做。
+TARGET_ELEVATED 絕不 retry。Browser CDP timeout 對具 idempotent 性質的 set_value
+與 navigate 可以 retry；若非 idempotent 輸入的 command 可能已送出，就不會盲目重做。
+無效 action、不支援的 URL scheme 與拒絕 attach unmanaged browser 都會立即失敗。
 
 支援的 postcondition key 是 element、element_absent、element_enabled、
-element_disabled、value、window_title_contains、ui_changed 與 ui_stable。
+element_exists、element_disabled、value、value_equals、text、text_equals、
+text_contains、window_title_contains、title_contains、url_equals、url_contains、
+ui_changed、ui_stable、page_changed、page_stable 與 navigation_complete。
 execution_trace 刻意保持精簡，不會在每個 attempt 重複整棵 UI tree。
 
-## v0.4 Phase 2 限制
+## v0.4 Phase 3 限制
 
 Windows Graphics Capture 是 best-effort：在不支援的 Windows/graphics 環境、受保護
 surface、最小化視窗、遠端工作階段或部分 GPU 應用程式上可能無法使用；回應會暴露
 失敗原因與 fallback 路徑。WGC 實作使用 Windows SDK Direct3D 11 interop，目前以同步
 方式讀回 BGRA8 frame。
 
-Browser 目前只正式支援 managed Google Chrome 與 Microsoft Edge，以及上述 Phase 2
-semantic actions。完整 browser postcondition、tab lifecycle、iframe/OOPIF routing、
-popup 管理、shadow-DOM 與完整 lifecycle tracking 留待後續 milestone。若 CDP screenshot 失敗且存在 managed window，browser
+Browser 目前只正式支援 managed Google Chrome 與 Microsoft Edge，以及上述 semantic
+actions 與 deterministic postcondition。多分頁 lifecycle、iframe/OOPIF routing、
+popup 管理、shadow-DOM、downloads/uploads、cookies/authentication 與完整 lifecycle
+tracking 留待後續 milestone。若 CDP screenshot 失敗且存在 managed window，browser
 observation 才會 fallback 到既有 desktop capture chain；semantic browser action
-絕不會 fallback 成猜測座標。Browser Host acceptance 必須由真實 Antigravity Agent
-task 呼叫這個 build 後才能算驗證；除非實際存在安全的 elevated GUI fixture，否則
+絕不會 fallback 成猜測座標。Phase 3 Host acceptance 是獨立 gate，native tests 或
+smoke script 不代表已通過；除非實際存在安全的 elevated GUI fixture，否則
 `TARGET_ELEVATED` host acceptance 仍保持未驗證。
 
-這個 Phase 2 不加入 OCR、policy engine、新 MCP tools、LLM planning、Playwright、任意
+這個 Phase 3 不加入 OCR、policy engine、新 MCP tools、LLM planning、Playwright、任意
 CDP/JavaScript、cookie/storage 存取，也不支援 macOS/Linux。
 
 WGC API 流程依循 Microsoft 的

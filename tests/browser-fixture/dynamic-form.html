@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Dynamic Computer Use form</title>
+    <style>
+      body { font: 16px sans-serif; margin: 40px; }
+      main { max-width: 520px; }
+      label, input, button { display: block; margin: 10px 0; }
+      input { padding: 8px; width: 280px; }
+      button { padding: 8px 16px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Dynamic form</h1>
+      <p id="loading">Loading controls...</p>
+      <form id="form" action="/success.html" method="get" hidden>
+        <label for="name">Name</label>
+        <input id="name" name="name" data-testid="name-field" placeholder="Enter your name" autocomplete="off">
+        <label for="email">Email</label>
+        <input id="email" name="email" data-testid="email-field" placeholder="Enter your email" autocomplete="off">
+        <button id="submit" data-testid="submit-button" type="submit">Submit</button>
+      </form>
+    </main>
+    <script>
+      setTimeout(() => {
+        document.getElementById('loading').hidden = true;
+        document.getElementById('form').hidden = false;
+      }, 350);
+    </script>
+  </body>
+</html>

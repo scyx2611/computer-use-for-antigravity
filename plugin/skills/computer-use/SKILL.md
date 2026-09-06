@@ -8,12 +8,12 @@ description: Use Computer Use for Antigravity to interact with Windows applicati
 Use Computer Use for Antigravity to interact with Windows applications and desktop GUI via MCP tools.
 
 ## Execution Guidelines
-- **Workflow Postconditions**: For computer_perform, use deterministic UIA/state expectations for element existence/absence, enabled state, exact value, window-title containment, UI change, and UI stability.
-- **Bounded Retry**: Add retry.max_attempts and retry.delay_ms only for bounded transient or idempotent recovery. The default is one attempt.
+- **Workflow Postconditions**: For computer_perform, use deterministic UIA/state expectations. Desktop supports element existence/absence, enabled state, exact value, window-title containment, UI change, and UI stability. Managed browser workflows additionally support URL exact/contains, title contains, element text/value, page changed/stable, and navigation complete.
+- **Bounded Retry**: Add retry.max_attempts and retry.delay_ms only for bounded transient or idempotent recovery. The default is two attempts and the hard maximum is five.
 - **Automatic Stale Recovery**: computer_perform owns a bounded stale re-observe and re-resolution when input has not been confirmed. computer_act keeps explicit state semantics and requires a fresh observe after STALE_STATE.
-- **Retry Safety**: Never retry TARGET_ELEVATED, invalid schemas, unsupported actions, or ambiguous input blindly. After input executes, only idempotent set_value and wait may retry a failed postcondition or stability check.
-- **Execution Trace**: Inspect execution_trace for step index, attempt, requested/resolved target, resolution method, state and screenshot hashes, capture backend, verification, retry reason, duration, and final status.
-- **Workflow Failure**: Treat a failed computer_perform result as structured data. Use its stable error code, failed step, attempt, action-executed flag, verification, retry exhaustion flag, last observation, and execution trace to decide what to do next.
+- **Retry Safety**: Never retry TARGET_ELEVATED, invalid schemas, unsupported actions, ambiguous input, unsupported URL schemes, or unmanaged-browser attach refusal. After input executes, only idempotent set_value, navigate, and wait may retry a failed postcondition or stability check. A CDP timeout is retryable for idempotent browser work; non-idempotent input is retried only when the command was not sent.
+- **Execution Trace**: Inspect execution_trace for step index, surface/backend, attempt, requested/resolved target, resolution method, state and screenshot hashes, capture backend, navigation before/after, verification, retry reason, duration, action execution status, and final status.
+- **Workflow Failure**: Treat a failed computer_perform result as structured data. Use its stable error code, failed step, attempt, action-executed/action-execution-status fields, verification, retry exhaustion flag, last observation, browser session summary, and execution trace to decide what to do next.
 - **Primary Agent Only**: Desktop GUI operations must be executed directly by the primary agent using `call_mcp_tool` (ServerName: "computer-use"). Do not delegate GUI operations to subagents (subagents do not have access to lazy MCP tools).
 - **No Scratch Scripts**: Do not write scratch scripts or modify native C# source code to interact with the GUI; call MCP tools directly.
 - **No Schema Inspection**: Directly use the parameters below without reading `.json` schema files.
@@ -27,9 +27,10 @@ Use Computer Use for Antigravity to interact with Windows applications and deskt
 - **Elevation Safety**: Computer Use for Antigravity is Windows-only and does not elevate itself. If the target is reported as `TARGET_ELEVATED`, ask the user to decide how to proceed.
 - **Managed Browser Boundary**: For browser work, use `computer_launch` with `browser.mode: "managed"` and `browser.profile: "ephemeral"`. This starts only a runtime-owned Chrome/Edge profile. Never attach to the user's existing browser, default profile, cookies, storage, passwords, or tokens.
 - **Browser Observe Routing**: A managed Chrome/Edge window reports `interaction.surface: "browser"`, `interaction.backend: "browser_cdp"`, a compact CDP Accessibility tree, page metadata, tabs, and usually `capture.backend: "cdp_page_capture"`. An unmanaged browser remains on the desktop/UIA path; do not try to make it managed.
-- **Browser Semantic Actions**: Managed browser `computer_act` and `computer_perform` support only browser-native `click`, `type_text`, `set_value`, `press_key`/`hotkey`, `scroll`, and `navigate` in Phase 2. Use semantic targets from the latest observation; these actions use restricted CDP and never fall back to guessed coordinates or Windows `SendInput`.
+- **Browser Semantic Actions**: Managed browser `computer_act` and `computer_perform` support only browser-native `click`, `type_text`, `set_value`, `press_key`/`hotkey`, `scroll`, and `navigate`. Use semantic targets from the latest observation; these actions use restricted CDP and never fall back to guessed coordinates or Windows `SendInput`.
 - **Browser Target Resolution**: Prefer state-bound `element_id`, then explicit `css`/`test_id`, exact role plus accessible name, placeholder/label, visible text, and only then bounded case-insensitive/contains/fuzzy matching. If more than one candidate remains plausible, stop on `AMBIGUOUS_TARGET`; never select the first candidate.
 - **Browser State Lifecycle**: Browser element ids are document-scoped. A navigation, renderer document replacement, target change, or semantic state change invalidates the old browser state. `computer_act` requires a fresh `computer_observe` after `STALE_BROWSER_STATE`; `computer_perform` may perform bounded re-observe/re-resolution recovery for transient stale state.
+- **Browser Workflow Reliability**: `computer_perform` waits for bounded navigation/AX stability using repeated semantic samples, evaluates browser postconditions after each action, and returns navigation metadata plus compact trace entries. It re-observes and re-resolves transient stale/document states, but never chooses among ambiguous candidates.
 - **Browser Navigation Safety**: `navigate` accepts only `http`, `https`, or `about:blank`. Do not use `Runtime.evaluate`, arbitrary JavaScript, arbitrary CDP, cookies, storage, or the user's default browser profile as a workaround.
 - **Browser URL Safety**: Initial managed-browser URLs are limited to `http`, `https`, and `about:blank`. Reject `file:`, `javascript:`, `data:`, `chrome:`, `edge:`, `devtools:`, and other schemes. Do not use arbitrary CDP commands or JavaScript evaluation as a workaround.
 
@@ -66,3 +67,37 @@ Managed browser action examples:
 
 After navigation, use the newly returned browser `state_id`; element ids from
 the previous document are not valid across navigation.
+
+## Phase 3 Workflow Verification
+
+Managed-browser actions in `computer_perform` can include deterministic
+postconditions such as:
+
+```json
+{
+  "type": "click",
+  "target": { "test_id": "submit-button" },
+  "expect": {
+    "url_contains": "/success",
+    "title_contains": "Success",
+    "element_exists": { "role": "heading", "name": "Success" },
+    "text_contains": {
+      "target": { "role": "heading", "name": "Success" },
+      "contains": "uccess"
+    },
+    "page_changed": true,
+    "page_stable": true,
+    "navigation_complete": true
+  },
+  "retry": { "max_attempts": 2, "delay_ms": 150 }
+}
+```
+
+Supported browser verification keys are `url_equals`, `url_contains`,
+`title_contains`, `element`/`element_exists`, `element_absent`,
+`element_enabled`, `element_disabled`, `value`/`value_equals`, `text`,
+`text_equals`, `text_contains`, `page_changed`, `page_stable`, and
+`navigation_complete`. Stability uses bounded navigation and Accessibility
+samples. A failed workflow returns the failed step, attempts, retry status,
+action execution status, last observation, browser session summary, and
+`execution_trace`; it must not be reduced to an unexplained `MCP_ERROR`.

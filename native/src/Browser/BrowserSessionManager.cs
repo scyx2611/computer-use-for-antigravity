@@ -34,6 +34,7 @@ internal sealed class ManagedBrowserSession : IDisposable
     private CdpTargetDescriptor target;
     private string documentKey;
     private string documentGeneration = Guid.NewGuid().ToString("N");
+    private int? documentNodeId;
     private string? loaderId;
     private bool disposed;
 
@@ -133,7 +134,7 @@ internal sealed class ManagedBrowserSession : IDisposable
                     });
             }
 
-            var tabs = Endpoint.ListPageTargets();
+            var tabs = Endpoint.ListPageTargets(timeoutMilliseconds);
             if (tabs.Count == 0)
             {
                 throw new ComputerUseException(
@@ -172,6 +173,7 @@ internal sealed class ManagedBrowserSession : IDisposable
         {
             ThrowIfDisposed();
             documentGeneration = Guid.NewGuid().ToString("N");
+            documentNodeId = null;
             loaderId = requestedLoaderId;
             if (!string.IsNullOrWhiteSpace(requestedUrl))
             {
@@ -186,8 +188,29 @@ internal sealed class ManagedBrowserSession : IDisposable
         if (!string.Equals(documentKey, nextKey, StringComparison.Ordinal))
         {
             documentGeneration = Guid.NewGuid().ToString("N");
+            documentNodeId = null;
             loaderId = null;
             documentKey = nextKey;
+        }
+    }
+
+    public void UpdateDocumentNode(int? nextDocumentNodeId)
+    {
+        if (nextDocumentNodeId is null)
+        {
+            return;
+        }
+
+        lock (sync)
+        {
+            ThrowIfDisposed();
+            if (documentNodeId is not null && documentNodeId != nextDocumentNodeId)
+            {
+                documentGeneration = Guid.NewGuid().ToString("N");
+                loaderId = null;
+            }
+
+            documentNodeId = nextDocumentNodeId;
         }
     }
 

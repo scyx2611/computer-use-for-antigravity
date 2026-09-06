@@ -1,8 +1,8 @@
 # Antigravity Host Acceptance
 
 This checklist validates the installed global `computer-use` plugin inside a
-real Antigravity Agent task. It is a host-level gate for v0.2, v0.3, and the
-v0.4 Phase 2 browser acceptance cases, and is separate from the native unit
+real Antigravity Agent task. It is a host-level gate for v0.2, v0.3, v0.4
+Phase 2, and v0.4 Phase 3 browser acceptance cases, and is separate from the native unit
 tests, MCP handshake, and local smoke test. It documents host acceptance; it
 does not define or implement the runtime.
 
@@ -10,7 +10,7 @@ does not define or implement the runtime.
 
 這份 checklist 驗證全域 `computer-use` plugin 是否真的由 Antigravity
 Host 載入，並能在實際 Agent 任務中調用 Computer Use MCP。它包含 v0.2
-Host-level gate、v0.3 workflow 與 v0.4 Phase 2 browser 驗收案例，並與
+Host-level gate、v0.3 workflow、v0.4 Phase 2 與 v0.4 Phase 3 browser 驗收案例，並與
 native unit tests、MCP handshake、local smoke test 分開計算；文件只描述
 Host 驗收，不實作 runtime。
 
@@ -204,6 +204,59 @@ Notes:
 An ordinary Chrome/Edge opened outside the runtime must remain unmanaged and
 must not be attached. `TARGET_ELEVATED` remains `NOT RUN` unless a safe fixture
 exists.
+
+## v0.4 Phase 3 reliable browser workflow / Reliable Browser Workflow
+
+This section is the host gate for the Phase 3 build. It is intentionally
+separate from the native `browser-workflow-test.ps1` script: a local fixture
+proves the runtime, while only a restarted Antigravity Agent proves that the
+global plugin exposes the new schema and calls the browser workflow path.
+
+Before starting, publish the current Phase 3 build to an isolated directory,
+install it with `.\install.ps1`, and restart Antigravity. Do not merge `main`
+or create a release tag as part of this acceptance.
+
+```powershell
+dotnet publish .\native\ComputerUse.Native.csproj -c Release -r win-x64 --self-contained false -o .\dist\native-v0.4-phase3
+.\scripts\browser-workflow-test.ps1 -Browser chrome
+.\scripts\browser-workflow-test.ps1 -Browser edge
+```
+
+In a fresh Antigravity task, require the Agent to use only the global
+`computer-use` MCP server and to report the actual tool trace. The positive
+workflow is:
+
+```text
+computer_launch (managed Chrome)
+-> computer_observe
+-> computer_perform:
+   navigate -> set_value Name -> set_value Email -> click Submit
+-> final browser observation/verification
+```
+
+The final action must verify URL, title, Success heading/text, page change,
+page stability, and navigation completion. Record `surface=browser`,
+`backend=browser_cdp`, `capture.backend=cdp_page_capture`, each action's
+postcondition result, navigation URL before/after, retry reason (if any), and
+the complete compact `execution_trace`.
+
+Run these negative cases in separate fresh tasks or after returning to the
+fixture:
+
+| Case | Expected result |
+| --- | --- |
+| Dynamic element appears after a short delay | bounded target retry succeeds, with no unbounded wait |
+| Transient CDP timeout before command dispatch | bounded retry succeeds and trace records the retry reason |
+| Postcondition never becomes true | `POSTCONDITION_FAILED`, correct step, attempts used, `retry_exhausted=true` |
+| Navigation replaces the document during a workflow | `computer_perform` re-observes/re-resolves and continues |
+| Duplicate semantic target | `AMBIGUOUS_TARGET`, candidates/scores preserved, no action or coordinate fallback |
+| CDP timeout after non-idempotent input may have been sent | no blind retry; action execution status is `unknown` |
+| `javascript:alert(1)` navigation | `UNSUPPORTED_URL_SCHEME`, no CDP navigation |
+
+`TARGET_ELEVATED` remains `NOT RUN` unless a safe already-running elevated
+fixture exists. Do not create UAC prompts or change privilege state to test it.
+Until this section has an actual recorded Agent trace, Phase 3 Host
+acceptance is `NOT VERIFIED`, even if all native and MCP checks pass.
 
 ## Evidence rules / 證據規則
 

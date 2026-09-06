@@ -103,6 +103,7 @@ internal sealed class WorkflowRunner
                             after,
                             execution,
                             verification,
+                            stability,
                             null,
                             "passed",
                             null,
@@ -123,7 +124,9 @@ internal sealed class WorkflowRunner
                         $"Workflow step failed unexpectedly: {exception.Message}");
                 }
 
-                actionExecuted = execution?.ActionExecuted ?? actionExecuted;
+                actionExecuted = execution?.ActionExecuted
+                    ?? ReadActionExecuted(failure?.Details)
+                    ?? actionExecuted;
                 var retryDecision = DecideRetry(
                     failure,
                     action,
@@ -142,6 +145,7 @@ internal sealed class WorkflowRunner
                     after,
                     execution,
                     verification,
+                    stability,
                     failure,
                     retryDecision.CanRetry ? "retrying" : "failed",
                     retryDecision.Reason,
@@ -186,12 +190,52 @@ internal sealed class WorkflowRunner
 
     private static void ValidateWorkflow(IReadOnlyList<JsonObject> actions)
     {
-        foreach (var action in actions)
+        for (var actionIndex = 0; actionIndex < actions.Count; actionIndex++)
         {
-            _ = RetryPolicy.ReadActionType(action);
-            _ = RetryPolicy.Read(action);
-            PostconditionEvaluator.Validate(action["expect"]);
+            var action = actions[actionIndex];
+            string? actionType = null;
+            try
+            {
+                actionType = RetryPolicy.ReadActionType(action);
+                _ = RetryPolicy.Read(action);
+                PostconditionEvaluator.Validate(action["expect"]);
+            }
+            catch (ComputerUseException exception)
+            {
+                throw BuildValidationFailure(actionIndex, actionType, exception);
+            }
         }
+    }
+
+    private static ComputerUseException BuildValidationFailure(
+        int actionIndex,
+        string? actionType,
+        ComputerUseException failure)
+    {
+        var details = failure.Details as JsonObject is { } originalDetails
+            ? (JsonObject)originalDetails.DeepClone()
+            : new JsonObject();
+
+        details["step_index"] = actionIndex + 1;
+        details["action_type"] = actionType ?? "unknown";
+        details["attempt"] = 0;
+        details["attempts_used"] = 0;
+        details["retry_allowed"] = false;
+        details["retry_exhausted"] = false;
+        details["action_executed"] = false;
+        details["action_execution_status"] = "not_executed";
+        details["last_observation"] = new JsonObject { ["available"] = false };
+        details["session"] = new JsonObject { ["surface"] = "unknown", ["valid"] = false };
+        details["execution_trace"] = new JsonArray();
+        if (failure.Details is not null)
+        {
+            details["cause_details"] = failure.Details.DeepClone();
+        }
+
+        return new ComputerUseException(
+            failure.Code,
+            $"Workflow step {actionIndex + 1} is invalid: {failure.Message}",
+            details);
     }
 
     private static RetryDecision DecideRetry(
@@ -210,13 +254,14 @@ internal sealed class WorkflowRunner
 
         if (!actionExecuted
             && failure.Code is "STALE_STATE" or "STALE_BROWSER_STATE" or "BROWSER_FRAME_DETACHED"
-            && !staleRecoveryUsed)
+            && !staleRecoveryUsed
+            && attempt < retryPolicy.MaxAttempts)
         {
             staleRecoveryUsed = true;
             return new RetryDecision(true, "stale_state_reobserve", true, false);
         }
 
-        if (!actionExecuted && RetryPolicy.IsRetryableBeforeExecution(failure.Code, action))
+        if (!actionExecuted && RetryPolicy.IsRetryableBeforeExecution(failure.Code, action, failure.Details))
         {
             var canRetry = attempt < retryPolicy.MaxAttempts;
             return new RetryDecision(
@@ -235,7 +280,7 @@ internal sealed class WorkflowRunner
         }
 
         var retryAllowed = !actionExecuted
-            ? RetryPolicy.IsRetryableBeforeExecution(failure.Code, action)
+            ? RetryPolicy.IsRetryableBeforeExecution(failure.Code, action, failure.Details)
             : RetryPolicy.IsSafeToRetryAfterExecution(actionType)
                 && (failure.Code is "POSTCONDITION_FAILED" or "UI_NOT_STABLE");
         return RetryDecision.NoRetry with
@@ -254,6 +299,7 @@ internal sealed class WorkflowRunner
         WorkflowObservation? after,
         ActionExecutionResult? execution,
         PostconditionVerification? verification,
+        UiStabilityResult? stability,
         ComputerUseException? failure,
         string finalStatus,
         string? retryReason,
@@ -264,6 +310,8 @@ internal sealed class WorkflowRunner
         {
             StepIndex = actionIndex + 1,
             ActionType = actionType,
+            Surface = before?.Result.Interaction.Surface ?? after?.Result.Interaction.Surface,
+            Backend = before?.Result.Interaction.Backend ?? after?.Result.Interaction.Backend,
             Attempt = attempt,
             TargetRequested = ExtractTarget(action),
             Resolution = execution?.Resolution,
@@ -274,10 +322,15 @@ internal sealed class WorkflowRunner
             ScreenshotHashAfter = after?.Result.ScreenshotHash,
             Postcondition = action["expect"]?.DeepClone(),
             Verification = verification,
+            Stability = stability,
+            Navigation = CreateNavigationTrace(before, after, stability),
             RetryReason = retryReason,
             DurationMilliseconds = ElapsedMilliseconds(started),
             FinalStatus = finalStatus,
-            ActionExecuted = execution?.ActionExecuted ?? false,
+            ActionExecuted = execution?.ActionExecuted
+                ?? ReadActionExecuted(failure?.Details)
+                ?? false,
+            ActionExecutionStatus = ReadActionExecutionStatus(execution, failure),
             ErrorCode = failure?.Code,
             ErrorMessage = failure?.Message
         };
@@ -307,7 +360,11 @@ internal sealed class WorkflowRunner
             ["retry_allowed"] = retryDecision.RetryAllowed,
             ["retry_exhausted"] = retryDecision.RetryExhausted,
             ["action_executed"] = actionExecuted,
+            ["action_execution_status"] = actionExecuted
+                ? "executed"
+                : ReadActionExecutionStatus(null, failure),
             ["last_observation"] = ObservationSummary(lastObservation),
+            ["session"] = SessionSummary(lastObservation, failure),
             ["execution_trace"] = JsonSerializer.SerializeToNode(trace)
         };
 
@@ -327,6 +384,64 @@ internal sealed class WorkflowRunner
             details);
     }
 
+    private static NavigationTrace? CreateNavigationTrace(
+        WorkflowObservation? before,
+        WorkflowObservation? after,
+        UiStabilityResult? stability)
+    {
+        if (before?.Result.Browser is null && after?.Result.Browser is null)
+        {
+            return null;
+        }
+
+        var beforeBrowser = before?.Result.Browser;
+        var afterBrowser = after?.Result.Browser;
+        var occurred = stability?.NavigationOccurred
+            ?? (beforeBrowser is not null
+                && afterBrowser is not null
+                && (!string.Equals(beforeBrowser.TargetId, afterBrowser.TargetId, StringComparison.Ordinal)
+                    || !string.Equals(beforeBrowser.DocumentGeneration, afterBrowser.DocumentGeneration, StringComparison.Ordinal)
+                    || !string.Equals(beforeBrowser.Url, afterBrowser.Url, StringComparison.Ordinal)));
+
+        return new NavigationTrace
+        {
+            Occurred = occurred,
+            Complete = stability?.NavigationComplete
+                ?? afterBrowser?.NavigationComplete
+                ?? false,
+            UrlBefore = beforeBrowser?.Url,
+            UrlAfter = afterBrowser?.Url ?? stability?.UrlAfter,
+            DocumentGenerationBefore = beforeBrowser?.DocumentGeneration,
+            DocumentGenerationAfter = afterBrowser?.DocumentGeneration ?? stability?.DocumentGenerationAfter
+        };
+    }
+
+    private static string ReadActionExecutionStatus(
+        ActionExecutionResult? execution,
+        ComputerUseException? failure)
+    {
+        if (execution is not null)
+        {
+            return execution.ActionExecuted ? "executed" : "not_executed";
+        }
+
+        return failure?.Details is JsonObject details
+            && details["command_sent"] is JsonValue value
+            && value.TryGetValue<bool>(out var commandSent)
+            && commandSent
+            ? "unknown"
+            : "not_executed";
+    }
+
+    private static bool? ReadActionExecuted(JsonNode? details)
+    {
+        return details is JsonObject objectNode
+            && objectNode["action_executed"] is JsonValue value
+            && value.TryGetValue<bool>(out var actionExecuted)
+            ? actionExecuted
+            : null;
+    }
+
     private static JsonObject ObservationSummary(WorkflowObservation? observation)
     {
         if (observation is null)
@@ -343,10 +458,47 @@ internal sealed class WorkflowRunner
             ["available"] = true,
             ["state_id"] = result.StateId,
             ["window"] = JsonSerializer.SerializeToNode(result.Window),
+            ["interaction"] = JsonSerializer.SerializeToNode(result.Interaction),
             ["screenshot_hash"] = result.ScreenshotHash,
             ["capture"] = JsonSerializer.SerializeToNode(result.Capture),
             ["element_count"] = result.Elements.Count,
             ["ui_signature"] = observation.UiSignature
+        };
+    }
+
+    private static JsonObject SessionSummary(
+        WorkflowObservation? observation,
+        ComputerUseException? failure)
+    {
+        if (observation?.Result.Browser is not { } browser)
+        {
+            return new JsonObject
+            {
+                ["surface"] = "desktop",
+                ["valid"] = false
+            };
+        }
+
+        var invalidCodes = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "BROWSER_SESSION_CLOSED",
+            "BROWSER_TARGET_CLOSED",
+            "BROWSER_TARGET_NOT_FOUND",
+            "BROWSER_BACKEND_UNAVAILABLE",
+            "BROWSER_CAPTURE_UNAVAILABLE",
+            "CDP_CONNECTION_FAILED"
+        };
+        return new JsonObject
+        {
+            ["surface"] = "browser",
+            ["valid"] = failure is null || !invalidCodes.Contains(failure.Code),
+            ["session_id"] = browser.SessionId,
+            ["target_id"] = browser.TargetId,
+            ["document_generation"] = browser.DocumentGeneration,
+            ["url"] = browser.Url,
+            ["title"] = browser.Title,
+            ["lifecycle"] = browser.Lifecycle,
+            ["navigation_complete"] = browser.NavigationComplete
         };
     }
 
