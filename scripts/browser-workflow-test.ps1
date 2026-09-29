@@ -1,12 +1,17 @@
 [CmdletBinding()]
 param(
-    [string]$NativePath = (Join-Path $PSScriptRoot '..\dist\native-v0.4-phase3\ComputerUse.Native.exe'),
+    [string]$NativePath,
     [ValidateSet('chrome', 'edge')]
     [string]$Browser = 'chrome',
     [int]$TimeoutMilliseconds = 20000
 )
 
 $ErrorActionPreference = 'Stop'
+
+$scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
+if ([string]::IsNullOrWhiteSpace($NativePath)) {
+    $NativePath = Join-Path $scriptDir '..\dist\native-v0.4-phase3\ComputerUse.Native.exe'
+}
 
 function Assert-Condition {
     param([bool]$Condition, [string]$Message)

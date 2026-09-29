@@ -48,6 +48,12 @@ internal sealed class ChromiumLauncher
             startInfo.ArgumentList.Add($"--user-data-dir={profilePath}");
             startInfo.ArgumentList.Add("--no-first-run");
             startInfo.ArgumentList.Add("--no-default-browser-check");
+            startInfo.ArgumentList.Add("--disable-search-engine-choice-screen");
+            startInfo.ArgumentList.Add("--disable-features=Translate,OptimizationHints,MediaRouter");
+            startInfo.ArgumentList.Add("--disable-translate");
+            startInfo.ArgumentList.Add("--disable-background-networking");
+            startInfo.ArgumentList.Add("--disable-sync");
+            startInfo.ArgumentList.Add("--disable-default-apps");
             foreach (var argument in userArguments)
             {
                 startInfo.ArgumentList.Add(argument);
@@ -284,6 +290,7 @@ internal sealed class ChromiumLauncher
         var start = Stopwatch.GetTimestamp();
         var deadline = start + (long)(timeoutMilliseconds * (double)Stopwatch.Frequency / 1000.0);
 
+        WindowInfo? fallbackCandidate = null;
         while (Stopwatch.GetTimestamp() < deadline)
         {
             foreach (var window in windows.ListVisibleWindows())
@@ -299,10 +306,29 @@ internal sealed class ChromiumLauncher
                     continue;
                 }
 
-                return window;
+                // 檢查視窗尺寸，優先匹配正常尺寸的主視窗（例如寬與高至少 320x240），避免誤抓臨時翻譯或通知氣泡
+                try
+                {
+                    var hwnd = windows.ResolveWindowId(window.Id);
+                    var rect = windows.GetWindowRectData(hwnd);
+                    if (rect.Width >= 320 && rect.Height >= 240)
+                    {
+                        return window;
+                    }
+                    fallbackCandidate ??= window;
+                }
+                catch
+                {
+                    fallbackCandidate ??= window;
+                }
             }
 
             Thread.Sleep(pollMilliseconds);
+        }
+
+        if (fallbackCandidate is not null)
+        {
+            return fallbackCandidate;
         }
 
         throw new ComputerUseException(
