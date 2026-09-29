@@ -1,10 +1,15 @@
 [CmdletBinding()]
 param(
-    [string]$NativePath = (Join-Path $PSScriptRoot '..\dist\native\ComputerUse.Native.exe'),
+    [string]$NativePath,
     [int]$TimeoutMilliseconds = 15000
 )
 
 $ErrorActionPreference = 'Stop'
+
+$scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
+if ([string]::IsNullOrWhiteSpace($NativePath)) {
+    $NativePath = Join-Path $scriptDir '..\dist\native\ComputerUse.Native.exe'
+}
 
 function Assert-Condition {
     param(
@@ -149,14 +154,19 @@ finally {
         [void][ComputerUseSmokeNativeMethods]::PostMessage($windowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
     }
 
-    if ($null -ne $notepadLauncher -and -not $notepadLauncher.HasExited) {
-        $notepadLauncher.Refresh()
-        if ($existingNotepadPids -notcontains $notepadLauncher.Id) {
-            $notepadLauncher.CloseMainWindow() | Out-Null
-            if (-not $notepadLauncher.WaitForExit(1500)) {
-                $notepadLauncher.Kill()
-                $notepadLauncher.WaitForExit()
+    if ($null -ne $notepadLauncher) {
+        try {
+            $notepadLauncher.Refresh()
+            if (-not $notepadLauncher.HasExited -and $existingNotepadPids -notcontains $notepadLauncher.Id) {
+                [void]$notepadLauncher.CloseMainWindow()
+                if (-not $notepadLauncher.WaitForExit(1500)) {
+                    $notepadLauncher.Kill()
+                    $notepadLauncher.WaitForExit()
+                }
             }
+        }
+        catch [System.InvalidOperationException] {
+            # 程序已正常退出
         }
     }
 
