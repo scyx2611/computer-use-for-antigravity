@@ -13,3 +13,4 @@ tests/**/obj/
 tests/**/TestResults/
 
 dist/
+*.zip
