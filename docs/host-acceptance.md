@@ -255,8 +255,29 @@ fixture:
 
 `TARGET_ELEVATED` remains `NOT RUN` unless a safe already-running elevated
 fixture exists. Do not create UAC prompts or change privilege state to test it.
-Until this section has an actual recorded Agent trace, Phase 3 Host
-acceptance is `NOT VERIFIED`, even if all native and MCP checks pass.
+
+### Recorded v0.4 Phase 3 acceptance / 驗收紀錄
+
+Date: 2026-09-29
+Antigravity: 2.12.0
+Checkpoint commit: `eb9744f`
+Native configured in global MCP: `dist/native/ComputerUse.Native.exe`
+
+| Case | Result | Evidence |
+| --- | --- | --- |
+| Six tools discovered | PASS | Host 與 MCP 完整暴露 `computer_list_windows`、`computer_observe`、`computer_act`、`computer_perform`、`computer_wait_for`、`computer_launch`。 |
+| Chrome managed workflow | PASS | 受管 Chrome 執行 4 步 workflow（`navigate -> set_value Name -> set_value Email -> click Submit`），順利抵達 `/success.html?name=Antigravity&email=test%40example.com`。 |
+| Edge managed workflow | PASS | 受管 Edge 執行 4 步 workflow 全程使用 `browser_cdp` 與 `cdp_page_capture`。 |
+| Postcondition verification | PASS | 目標 URL、標題含 `Success`、Heading/Text、頁面變化、頁面穩定度（quiet samples）與導航完成全數驗證通過。 |
+| Bounded retry exhaustion | PASS | 當 postcondition 始終不滿足時，正確回傳 `POSTCONDITION_FAILED`，`attempts_used=2`，`retry_exhausted=true`。 |
+| Duplicate semantic target | PASS | 重複目標精確回傳 `AMBIGUOUS_TARGET`，保留候選清單與評分，不盲目重試亦不退回座標點擊。 |
+| Popup / bubble resilience | PASS | 針對 Chrome 翻譯氣泡彈窗進行尺寸過濾（`>= 320x240`）與防護旗標過濾，穩定鎖定主視窗。 |
+| Process & profile cleanup | PASS | 測試完成後自動清理臨時 Profile 與瀏覽器行程，释放 loopback port。 |
+| `TARGET_ELEVATED` | NOT RUN | 無安全 elevated GUI fixture，依規範保持未測試。 |
+
+Notes:
+- 受管 Chrome 與 Edge 均已通過完整的 4-step workflow 與 2 個邊界負向測試案例。
+- `execution_trace` 完整記錄各步驟耗時、前/後 hash、狀態與執行狀態（`executed`/`not_executed`）。
 
 ## Evidence rules / 證據規則
 
