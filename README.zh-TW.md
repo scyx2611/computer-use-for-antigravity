@@ -17,10 +17,9 @@ Antigravity -> MCP stdio -> TypeScript bridge -> JSONL -> 常駐 .NET runtime
                                                        -> Managed Browser：CDP / Accessibility
 ```
 
-## 狀態：v0.4 Phase 3 — Reliable Browser Workflow
+## 狀態：v0.4.0 — Reliable Browser Workflow & Desktop Capture
 
-這個階段保留原有六個 MCP tools，並把確定性的 browser-native input 擴充成
-有界、可驗證的 workflow：
+這個版本保留原有六個 MCP tools，並將受管瀏覽器（Chrome 與 Edge）與桌面環境整合成確定性、可驗證的完整工作流程：
 
 - Windows Graphics Capture 是主要截圖 backend。
 - 擷取失敗時依序 fallback 到 `PrintWindow`、`BitBlt`。
@@ -116,14 +115,7 @@ dist/native/ComputerUse.Native.exe
 mcp/dist/index.js
 ```
 
-v0.4 Phase 3 建議 publish 到獨立目錄，避免 Host acceptance 尚未完成時覆蓋已安裝的
- v0.3 runtime：
-
-```powershell
-dotnet publish .\native\ComputerUse.Native.csproj -c Release -r win-x64 --self-contained false -o .\dist\native-v0.4-phase3
-```
-
-## Windows 冒煙測試
+## Windows 桌面冒煙測試
 
 完成 publish 後執行受控的 Notepad end-to-end 檢查：
 
@@ -138,29 +130,20 @@ dotnet publish .\native\ComputerUse.Native.csproj -c Release -r win-x64 --self-c
 可重複執行的真實 Host 驗收 checklist 請見
 [`docs/host-acceptance.md`](./docs/host-acceptance.md)。
 
-## Managed browser Phase 3 smoke test
+## 受管瀏覽器 Workflow 冒煙測試
 
-舊的 observation/action script 仍可使用；Phase 3 workflow script 會啟動自己的隔離
-Chrome/Edge profile，檢查 browser postcondition、navigation/stability metadata、
-execution trace 與 workflow failure structure。所有 script 都不會 attach 或關閉既有 browser：
+受管瀏覽器 workflow 腳本會啟動自己的隔離 Chrome/Edge profile，檢查 browser
+postcondition、navigation/stability metadata、execution trace 與 workflow failure structure。
+所有 script 都不會 attach 或關閉既有瀏覽器：
 
 ```powershell
-.\scripts\browser-spike-test.ps1 -Browser chrome
-.\scripts\browser-spike-test.ps1 -Browser edge
-.\scripts\browser-action-test.ps1 -Browser chrome
-.\scripts\browser-action-test.ps1 -Browser edge
 .\scripts\browser-workflow-test.ps1 -Browser chrome
 .\scripts\browser-workflow-test.ps1 -Browser edge
 ```
 
-觀察腳本預期 native spike 位於
-`dist/native-v0.4-spike/ComputerUse.Native.exe`；也可用 `-NativePath` 指定其他
-build。action 腳本預期
-`dist/native-v0.4-phase2/ComputerUse.Native.exe`；也可用 `-NativePath` 指定其他
-build；workflow 腳本預期
-`dist/native-v0.4-phase3/ComputerUse.Native.exe`；也可用 `-NativePath` 指定其他
-build。PASS 只代表 native integration 通過，不代表 Antigravity 已載入這個 branch
-的 plugin。
+腳本預設使用 `dist/native/ComputerUse.Native.exe`，也可用 `-NativePath` 指定其他
+build 路徑。PASS 代表 native integration 通過，Host 實際調用驗收請見
+[`docs/host-acceptance.md`](./docs/host-acceptance.md)。
 
 ## 全域安裝
 
@@ -322,7 +305,7 @@ text_contains、window_title_contains、title_contains、url_equals、url_contai
 ui_changed、ui_stable、page_changed、page_stable 與 navigation_complete。
 execution_trace 刻意保持精簡，不會在每個 attempt 重複整棵 UI tree。
 
-## v0.4 Phase 3 限制
+## v0.4.0 限制與邊界
 
 Windows Graphics Capture 是 best-effort：在不支援的 Windows/graphics 環境、受保護
 surface、最小化視窗、遠端工作階段或部分 GPU 應用程式上可能無法使用；回應會暴露

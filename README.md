@@ -19,10 +19,9 @@ Antigravity -> MCP stdio -> TypeScript bridge -> JSONL -> persistent .NET runtim
                                                        -> Managed Browser: CDP / Accessibility
 ```
 
-## Status: v0.4 Phase 3 — Reliable Browser Workflow
+## Status: v0.4.0 — Reliable Browser Workflow & Desktop Capture
 
-This phase keeps the existing six MCP tools and extends deterministic browser
-input into bounded, verifiable workflows:
+This release keeps the existing six MCP tools and integrates managed browser (Chrome & Edge) and desktop workflows with deterministic guarantees:
 
 - Windows Graphics Capture is the primary screenshot backend.
 - Capture falls back in order to `PrintWindow`, then `BitBlt`.
@@ -130,14 +129,7 @@ dist/native/ComputerUse.Native.exe
 mcp/dist/index.js
 ```
 
-For v0.4 Phase 3, publish to a separate directory so an installed v0.3 runtime
-is not replaced while host acceptance remains a separate gate:
-
-```powershell
-dotnet publish .\native\ComputerUse.Native.csproj -c Release -r win-x64 --self-contained false -o .\dist\native-v0.4-phase3
-```
-
-## Windows smoke test
+## Windows desktop smoke test
 
 After publishing, run the controlled Notepad end-to-end check:
 
@@ -154,30 +146,21 @@ that Antigravity has reloaded the global plugin.
 For the repeatable real-host checklist, see
 [`docs/host-acceptance.md`](./docs/host-acceptance.md).
 
-## Managed browser Phase 3 smoke test
+## Managed browser workflow smoke test
 
-The earlier observation/action scripts remain available. The Phase 3 workflow
-script launches only its own isolated Chrome or Edge profile and checks browser
+The managed browser workflow script launches its own isolated Chrome or Edge profile and checks browser
 postconditions, navigation/stability metadata, execution trace, and workflow
 failure structure. None of these scripts attaches to or closes an existing
 browser profile:
 
 ```powershell
-.\scripts\browser-spike-test.ps1 -Browser chrome
-.\scripts\browser-spike-test.ps1 -Browser edge
-.\scripts\browser-action-test.ps1 -Browser chrome
-.\scripts\browser-action-test.ps1 -Browser edge
 .\scripts\browser-workflow-test.ps1 -Browser chrome
 .\scripts\browser-workflow-test.ps1 -Browser edge
 ```
 
-The observation script expects the spike publish output at
-`dist/native-v0.4-spike/ComputerUse.Native.exe`. Pass `-NativePath` to use a
-different build. The action script expects
-`dist/native-v0.4-phase2/ComputerUse.Native.exe`; the workflow script expects
-`dist/native-v0.4-phase3/ComputerUse.Native.exe`. Pass `-NativePath` to use a
-different build. These are native integration checks, not proof that
-Antigravity has loaded the branch's plugin.
+The script defaults to `dist/native/ComputerUse.Native.exe`. Pass `-NativePath` to use a
+different build. PASS indicates native integration; see
+[`docs/host-acceptance.md`](./docs/host-acceptance.md) for host-level acceptance.
 
 ## Install globally
 
@@ -345,7 +328,7 @@ ui_changed, ui_stable, page_changed, page_stable, and navigation_complete.
 The result's execution_trace is intentionally compact and does not duplicate
 the full UI tree for every attempt.
 
-## v0.4 Phase 3 limitations
+## v0.4.0 limitations and boundaries
 
 Windows Graphics Capture is best-effort. It can be unavailable on unsupported
 Windows/graphics environments, protected surfaces, minimized windows, remote
