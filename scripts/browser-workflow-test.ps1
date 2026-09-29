@@ -10,7 +10,9 @@ $ErrorActionPreference = 'Stop'
 
 $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
 if ([string]::IsNullOrWhiteSpace($NativePath)) {
-    $NativePath = Join-Path $scriptDir '..\dist\native-v0.4-phase3\ComputerUse.Native.exe'
+    $standardNative = Join-Path $scriptDir '..\dist\native\ComputerUse.Native.exe'
+    $phase3Native = Join-Path $scriptDir '..\dist\native-v0.4-phase3\ComputerUse.Native.exe'
+    $NativePath = if (Test-Path -LiteralPath $standardNative -PathType Leaf) { $standardNative } else { $phase3Native }
 }
 
 function Assert-Condition {
