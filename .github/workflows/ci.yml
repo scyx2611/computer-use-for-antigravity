@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    name: Build & Test (Windows x64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build Native Runtime
+        run: |
+          dotnet build native/ComputerUse.Native.csproj -c Release
+
+      - name: Run Native Unit Tests
+        run: |
+          dotnet build tests/ComputerUse.Native.Tests/ComputerUse.Native.Tests.csproj -c Release
+          dotnet run --project tests/ComputerUse.Native.Tests/ComputerUse.Native.Tests.csproj -c Release --no-build
+
+      - name: Publish Native Runtime
+        run: |
+          dotnet publish native/ComputerUse.Native.csproj -c Release -r win-x64 --self-contained false -o dist/native
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: './mcp/package-lock.json'
+
+      - name: Install MCP Dependencies
+        working-directory: ./mcp
+        run: npm ci
+
+      - name: Typecheck MCP Bridge
+        working-directory: ./mcp
+        run: npm run typecheck
+
+      - name: Build MCP Bridge
+        working-directory: ./mcp
+        run: npm run build

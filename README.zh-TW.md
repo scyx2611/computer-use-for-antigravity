@@ -2,330 +2,205 @@
 
 [English](README.md) · **繁體中文**
 
-適用於 Windows 的 Antigravity 原生 Computer Use 執行環境。
+<p align="left">
+  <a href="https://github.com/scyx2611/computer-use-for-antigravity/releases/tag/v0.4.0"><img src="https://img.shields.io/badge/Release-v0.4.0-blue.svg?style=flat-square" alt="Release v0.4.0" /></a>
+  <img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(x64)-0078D6.svg?style=flat-square&logo=windows" alt="Platform" />
+  <img src="https://img.shields.io/badge/Runtime-.NET%208%20%7C%20Node.js%2020%2B-512BD4.svg?style=flat-square&logo=dotnet" alt="Runtime" />
+  <img src="https://img.shields.io/badge/Protocol-Model%20Context%20Protocol%20(MCP)-success.svg?style=flat-square" alt="MCP" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg?style=flat-square" alt="License: MIT" /></a>
+</p>
 
-使用者看到的產品名稱是 **Computer Use for Antigravity**。插件識別碼是
-`computer-use-for-antigravity`；MCP server key 保留為 `computer-use` 以維持相容性。
+專為 **Antigravity** 打造的 Windows 原生高可靠度 Computer Use 執行環境。
 
-Computer Use for Antigravity 保持模型端介面精簡，將容易出錯的桌面互動交給確定性的執行環境：
+使用者看到的產品名稱是 **Computer Use for Antigravity**。插件識別碼為 `computer-use-for-antigravity`；MCP server key 維持 `computer-use` 以確保向下相容性。
 
-```text
-Antigravity -> MCP stdio -> TypeScript bridge -> JSONL -> 常駐 .NET runtime
-                                                       -> Interaction Router
-                                                       -> Desktop：UI Automation / SendInput
-                                                       -> Desktop capture：WGC -> PrintWindow -> BitBlt
-                                                       -> Managed Browser：CDP / Accessibility
+Computer Use for Antigravity 的核心哲學是**「將模型介面保持精簡，把脆弱的桌面與瀏覽器互動交給確定性的原生執行環境」**。模型不再需要盲目猜測像素座標，而是透過語意結構節點、確定性後置條件驗證、自動狀態漂移重試以及硬體加速截圖，實現工業級的穩定自動化。
+
+---
+
+## 系統架構
+
+```mermaid
+graph TD
+    Host[Antigravity Host] -->|stdio JSON-RPC| MCP[TypeScript MCP Bridge]
+    MCP -->|JSONL stdin/stdout| Native[常駐 .NET 8 原生執行核心]
+    
+    subgraph Native Architecture [原生核心模組]
+        Native --> Router[Interaction Router 互動路由器]
+        
+        Router --> DesktopTrack[桌面互動軌道]
+        Router --> BrowserTrack[受管瀏覽器軌道]
+        
+        DesktopTrack --> UIA[UI Automation 語意解析]
+        DesktopTrack --> SendInput[Win32 SendInput 精確輸入]
+        DesktopTrack --> CaptureChain[三層截圖備援鏈]
+        
+        CaptureChain --> WGC[Windows Graphics Capture / D3D11]
+        WGC -.->|Fallback| PW[PrintWindow]
+        PW -.->|Fallback| BB[BitBlt / GDI]
+        
+        BrowserTrack --> CDP[受限 CDP 端點 / 127.0.0.1]
+        CDP --> Chrome[Google Chrome 暫存隔離 Profile]
+        CDP --> Edge[Microsoft Edge 暫存隔離 Profile]
+        BrowserTrack --> A11y[Accessibility Tree 語意解析]
+    end
 ```
 
-## 狀態：v0.4.0 — Reliable Browser Workflow & Desktop Capture
+---
 
-這個版本保留原有六個 MCP tools，並將受管瀏覽器（Chrome 與 Edge）與桌面環境整合成確定性、可驗證的完整工作流程：
+## 核心設計原則
 
-- Windows Graphics Capture 是主要截圖 backend。
-- 擷取失敗時依序 fallback 到 `PrintWindow`、`BitBlt`。
-- `observe` 與已驗證的 `perform` 回應會附上 `capture` 診斷資訊：
-  `backend`、`width`、`height`、`hash`、`fallback_used`，以及各 backend 的
-  `errors`。
-- 語意 selector 若有多個同樣合理的元素，會安全失敗並回傳
-  `AMBIGUOUS_TARGET` 與候選清單，不會自行猜第一個；唯一的精確匹配仍維持確定性。
-- 座標目標支援 `screen`、`window`、`normalized` 三種空間。為了向後相容，
-  既有 `x`/`y` 操作預設為 `screen`。
-- `observe.coordinate_spaces` 明確標示截圖像素是 `window` 座標，而 UI Automation
-  元素 bounds 是 `screen` 座標。
-- 原生程序仍是常駐 JSONL，公開的六個 MCP tool 名稱不變。
-- computer_perform 支援確定性的 desktop 與 browser postcondition，包括元素存在/不存在、
-  enabled 狀態、精確 value/text、標題或 URL 比對、UI/page changed、UI/page stable
-  與 navigation complete。
-- 每個 action 可用 retry.max_attempts 與 retry.delay_ms 設定有界重試。預設最多兩次，
-  上限為五次；若遇到 stale/document 狀態，runtime 會重新 observe 與 resolve 後再重試。
-- Browser stability 使用 navigation lifecycle 加上重複的 semantic Accessibility sample：
-  每 100ms polling、連續三個 quiet samples、最多等待 2,000ms，不依賴任意長時間 sleep。
-- computer_perform 回傳精簡的 execution_trace，包含 requested target、解析方式、
-  surface/backend、state/screenshot hash、capture backend、navigation 前後、
-  verification、retry reason、耗時、action execution status 與最後狀態。
-- Workflow 失敗會保留穩定 error code，並附上失敗步驟、attempt、是否已執行 action、
-  retry 是否耗盡、最後 observation/session 摘要、verification 與 trace。
-- `computer_launch` 支援對 Chrome 或 Edge 傳入
-  `browser: { "mode": "managed", "profile": "ephemeral" }`。runtime 會建立
-  私有 profile、啟動本機 CDP endpoint，並回傳 managed browser session。
-- `computer_observe` 只有在視窗屬於 runtime 管理的 browser session 時才會走受限
-  CDP；回傳 page metadata、精簡 Accessibility element、tab metadata 與
-  `cdp_page_capture` 截圖。
-- 一般使用者已開啟的 Chrome/Edge 絕不會被自動 attach；會留在 desktop/UIA 路徑，並
-  標記 `browser_detected` 與 `browser_semantic_available: false`。
-- managed browser 的 `computer_act` 與 `computer_perform` 支援 browser-native 的
-  `click`、`type_text`、`set_value`、`press_key`/`hotkey`、`scroll`、`navigate`，
-  只使用受限 CDP allowlist；不會 fallback 到猜測座標或 Windows `SendInput`。
-- browser selector 支援 state-bound `element_id`、明確的 `css`/`test_id`、精確
-  role/name、placeholder、可見文字，以及有界的大小寫不敏感/contains/fuzzy
-  比對。多個同樣合理的匹配會 fail closed 並回傳 `AMBIGUOUS_TARGET`。
-- browser state 綁定 managed session、page target、document generation、semantic
-  signature 與私有 CDP node handle。導航或 document replacement 會使舊 state 失效；
-  `computer_act` 回傳 `STALE_BROWSER_STATE`，`computer_perform` 則在有界 recovery
-  迴圈內重新 observe。
-- CDP transport 只暴露固定的 DOM/query、focus/scroll、mouse/key input、文字插入、
-  navigation 與 observation commands，不提供任意 CDP、`Runtime.evaluate`、cookies、
-  storage、password 或使用者預設 browser profile。
+| 原則 | 說明 |
+| :--- | :--- |
+| 🎯 **零猜測確定性 (Zero-Guess Determinism)** | 優先透過 Accessibility Tree 與 UI Automation 節點進行語意綁定（`role`、`name`、`test_id`）。多重相同候選時嚴格回傳 `AMBIGUOUS_TARGET`，拒絕隨機或猜測點擊。 |
+| 🛡️ **安全隔離受管沙箱 (Managed Ephemeral Sandbox)** | 支援 Chrome 與 Edge 受管啟動，自動配置專屬隔離 Profile 與本機 CDP 偵錯埠。受限指令白名單，絕不暴露任意 JS 執行、Cookie、儲存空間或使用者個人瀏覽器資料。 |
+| ⚡ **硬體加速視覺備援鏈 (Hardware-Accelerated Capture)** | 以 Direct3D 11 支援的 Windows Graphics Capture (WGC) 作為主要截圖引擎，具備即時、高效能特徵；自動依序回退至 `PrintWindow` 與 `BitBlt`，並回傳完整診斷資料。 |
+| 🔄 **有界漂移恢復與驗證 (Bounded Drift Recovery)** | `computer_perform` 支援多步行動與原子後置條件驗證（Postconditions）。若遇頁面刷新或 DOM 漂移，自動重新觀察與解析，提供最多 5 次有界重試。 |
 
-執行環境不會自行提升權限。如果能檢查目標程序的 token，對提升權限的目標會回傳
-`TARGET_ELEVATED`。
+---
 
-## 座標空間
+## 方案對比矩陣
 
-在 action 或座標 target 上設定 `coordinate_space`：
+| 特性維度 | 傳統視覺型 Computer Use | Computer Use for Antigravity (v0.4.0) |
+| :--- | :--- | :--- |
+| **目標選取** | 依靠視覺大模型猜測像素座標 (X, Y) | **語意節點綁定** (`role`, `name`, `test_id`) + 絕對/相對/比例座標 |
+| **多重匹配行為** | 隨機挑選或盲猜第一個候選 | **安全拒絕**，嚴格回傳 `AMBIGUOUS_TARGET` 與候選評分 |
+| **螢幕縮放/解析度** | DPI 縮放容易導致座標偏移與點擊失效 | **DPI 感知** + 螢幕/視窗/歸一化 (0~1) 座標空間抽象 |
+| **瀏覽器互動** | 純視覺畫面模擬鍵盤滑鼠 | **受管 CDP 原生通訊**，語意化填值、點擊、滾動與頁面導航 |
+| **瀏覽器安全性** | 可能誤觸使用者個人憑證與歷史紀錄 | **暫存 Profile 隔離**，進程與暫存目錄用完即焚 |
+| **結果驗證** | 再截一張圖交由視覺模型主觀推論 | **確定性後置條件驗證**（URL、標題、元素存在、文字相符、頁面穩定度） |
+| **錯誤恢復** | 提示詞重新嘗試（盲目重新輸入） | **自動重新觀察與解析**，遇到 stale/drift 時有界恢復（上限 5 次） |
 
-| 空間 | 意義 |
-| --- | --- |
-| `screen` | 絕對桌面像素；既有 `x`/`y` 呼叫的預設值。 |
-| `window` | 相對於觀察到的視窗左上角的像素。 |
-| `normalized` | 視窗範圍內 0 到 1 的比例；`(1, 1)` 會對應到最後一個視窗像素。 |
+---
 
-元素 `bounds` 仍是以螢幕座標表示的 `[left, top, width, height]`。截圖來自被擷取的
-視窗 surface，因此像素原點是視窗原點。請使用 observation 裡的
-`coordinate_spaces`，不要從圖片外觀猜測座標系統。
+## 快速上手 (Quick Start)
 
-## 建置
+### 系統需求
+- **作業系統**：Windows 10 / 11 (x64)
+- **開發環境**：.NET 8 SDK（含 Windows Desktop Runtime）與 Node.js 20+
 
-需求：
-
-- Windows 10/11；
-- .NET 8 SDK/runtime，以及 Windows Desktop runtime；
-- Node.js 20 或更新版本。
-
-在 repository 根目錄執行：
+### 1. 建置與編譯
+在專案根目錄執行 PowerShell 指令：
 
 ```powershell
-dotnet build .\native\ComputerUse.Native.csproj -c Release
-dotnet publish .\native\ComputerUse.Native.csproj -c Release -r win-x64 --self-contained false -o .\dist\native
+# 編譯並發布原生執行核心
+dotnet build native/ComputerUse.Native.csproj -c Release
+dotnet publish native/ComputerUse.Native.csproj -c Release -r win-x64 --self-contained false -o dist/native
 
-dotnet build .\tests\ComputerUse.Native.Tests\ComputerUse.Native.Tests.csproj -c Release
-dotnet run --project .\tests\ComputerUse.Native.Tests\ComputerUse.Native.Tests.csproj -c Release --no-build
+# 執行原生單元測試
+dotnet run --project tests/ComputerUse.Native.Tests/ComputerUse.Native.Tests.csproj -c Release --no-build
 
-Push-Location .\mcp
+# 編譯 TypeScript MCP Bridge
+Push-Location mcp
 npm ci
 npm run typecheck
 npm run build
 Pop-Location
 ```
 
-建置後的原生執行檔與 MCP bridge 位於：
-
-```text
-dist/native/ComputerUse.Native.exe
-mcp/dist/index.js
-```
-
-## Windows 桌面冒煙測試
-
-完成 publish 後執行受控的 Notepad end-to-end 檢查：
-
-```powershell
-.\scripts\smoke-test.ps1
-```
-
-腳本只會啟動自己的原生程序與暫存 Notepad 文件，檢查 WGC capture 診斷、輸入文字、
-刷新 state，最後復原測試輸入；清理時只關閉自己啟動的視窗/程序。Host plugin 的實際
-調用是另一個 acceptance gate；這個腳本不代表 Antigravity 已重新載入全域 plugin。
-
-可重複執行的真實 Host 驗收 checklist 請見
-[`docs/host-acceptance.md`](./docs/host-acceptance.md)。
-
-## 受管瀏覽器 Workflow 冒煙測試
-
-受管瀏覽器 workflow 腳本會啟動自己的隔離 Chrome/Edge profile，檢查 browser
-postcondition、navigation/stability metadata、execution trace 與 workflow failure structure。
-所有 script 都不會 attach 或關閉既有瀏覽器：
-
-```powershell
-.\scripts\browser-workflow-test.ps1 -Browser chrome
-.\scripts\browser-workflow-test.ps1 -Browser edge
-```
-
-腳本預設使用 `dist/native/ComputerUse.Native.exe`，也可用 `-NativePath` 指定其他
-build 路徑。PASS 代表 native integration 通過，Host 實際調用驗收請見
-[`docs/host-acceptance.md`](./docs/host-acceptance.md)。
-
-## 全域安裝
-
-建置完成後，為目前的 Windows 使用者安裝 plugin：
+### 2. 一鍵全域安裝
+自動為當前 Windows 使用者安裝 plugin 與 MCP 設定：
 
 ```powershell
 .\install.ps1
 ```
+> 安裝腳本會將設定檔寫入 `%USERPROFILE%/.gemini/config/plugins/computer-use-for-antigravity/`，並自動註冊全域 MCP 伺服器路徑。安裝後請重啟 Antigravity。
 
-安裝器會將 plugin 與 `computer-use` skill 複製到
-`%USERPROFILE%/.gemini/config/plugins/computer-use-for-antigravity/`，並以不含 BOM
-的 UTF-8 寫入符合目前 clone 路徑的設定。全域 MCP 設定中的既有項目會保留。
-安裝完成後重新啟動 Antigravity，使 plugin 與 MCP 設定重新載入。
-
-如果 host 只應從 plugin 自己的 `mcp_config.json` 載入 server，可使用：
-
+### 3. 執行冒煙測試
 ```powershell
-.\install.ps1 -SkipGlobalMcpConfig
+# 桌面 WGC 擷取與記事本測試
+.\scripts\smoke-test.ps1
+
+# 受管 Chrome 與 Edge 雙瀏覽器端到端工作流程測試
+.\scripts\browser-workflow-test.ps1 -Browser chrome
+.\scripts\browser-workflow-test.ps1 -Browser edge
 ```
 
-## MCP 設定
+---
 
-repository 不會提交含有本機絕對路徑的設定。
-`plugin/mcp_config.example.json` 是範本；若要手動設定 MCP，請將
-`<REPOSITORY_ROOT>` 替換成 clone 路徑，並使用正斜線。建議直接使用
-`install.ps1`，由它依照目前 clone 位置產生 plugin 與全域設定。
+## MCP 工具參考手冊
 
-刻意不安裝 workspace copy，避免 repository 開啟時重複載入全域 plugin。
+本專案向 Antigravity 暴露標準的 6 個 MCP 工具：
 
-## Native JSONL probe
+| 工具名稱 | 主要職責 | 重點參數 |
+| :--- | :--- | :--- |
+| `computer_launch` | 啟動應用程式或受管瀏覽器 | `path`: 執行檔路徑<br>`browser`: `{ mode: "managed", profile: "ephemeral" }`<br>`args`: 啟動參數 |
+| `computer_observe` | 觀察視窗狀態並擷取螢幕畫面 | `window_id`: 目標視窗 ID<br>`include_screenshot`: 是否包含 base64 截圖 |
+| `computer_perform` | **核心**：執行多步驟工作流程、驗證與有界重試 | `window_id`: 目標視窗 ID<br>`actions`: 動作清單（含 `expect` 與 `retry`）<br>`verify`: 啟用後置條件驗證 |
+| `computer_act` | 執行單一低階操作（受嚴格 state_id 綁定） | `window_id`: 目標視窗 ID<br>`state_id`: 前次觀察的狀態簽章<br>`action`: 操作定義 |
+| `computer_wait_for` | 等待視窗出現並確認可互動狀態 | `title_contains`: 視窗標題關鍵字<br>`timeout_ms`: 逾時毫秒數 |
+| `computer_list_windows` | 列出目前桌面所有可見的頂層視窗 | 無 |
 
-原生程序是長駐的單一請求佇列。每一行輸入是一個 JSON request，每一行輸出是一個
-JSON response：
+---
 
-```powershell
-$native = Resolve-Path .\dist\native\ComputerUse.Native.exe
-'{"id":1,"method":"list_windows","params":{}}' |
-  & $native
-```
+## 工作流程與後置條件 (Workflow & Postconditions)
 
-`observe` 回傳以螢幕座標表示的 UIA bounds，以及以視窗座標表示的截圖。截圖會以
-base64 PNG 資料放在原生回應中；MCP bridge 會將它回傳為 MCP image content block。
+在 `computer_perform` 中，你可以組合多步操作，並附加確定性後置條件進行自動驗證：
 
-## MCP tools
-
-公開的 tools：
-
-- `computer_list_windows`
-- `computer_observe`
-- `computer_act`
-- `computer_perform`
-- `computer_wait_for`
-- `computer_launch`
-
-使用 element id 操作前應先執行 `computer_observe`。在 `computer_perform` 中優先使用
-語意目標（`name`、`role`、`automation_id`）；執行環境會確定性解析目標、拒絕歧義
-匹配，並在每個操作之間重新觀察。
-
-啟動 managed browser 的參數範例：
-
-    {
-      "path": "chrome.exe",
-      "browser": { "mode": "managed", "profile": "ephemeral" },
-      "args": ["http://127.0.0.1:8080/"]
-    }
-
-使用回傳的 `window.id` 執行 `computer_observe`。browser observation 會回傳
-`interaction.backend: "browser_cdp"`、`capture.backend: "cdp_page_capture"`、
-`browser.session_id`、`target_id`、page URL/title、viewport、tabs 與精簡 semantic
-elements。目前 initial URL 只接受 `http`、`https` 與 `about:blank`。
-
-Managed browser action 使用最新 observation 的 semantic target：
-
+```json
+{
+  "window_id": "browser-window-id",
+  "actions": [
     {
       "type": "set_value",
-      "target": { "test_id": "email-field" },
-      "value": "alice@example.test"
-    }
-
+      "target": { "test_id": "email-input" },
+      "value": "developer@example.com",
+      "expect": {
+        "value_equals": {
+          "target": { "test_id": "email-input" },
+          "equals": "developer@example.com"
+        }
+      }
+    },
     {
       "type": "click",
-      "target": { "name": "Continue", "role": "link" }
+      "target": { "role": "button", "name": "登入" },
+      "expect": {
+        "url_contains": "/dashboard",
+        "title_contains": "控制面板",
+        "element_exists": { "role": "heading", "name": "歡迎回來" },
+        "page_stable": true,
+        "navigation_complete": true
+      },
+      "retry": { "max_attempts": 3, "delay_ms": 100 }
     }
+  ],
+  "verify": true
+}
+```
 
-    {
-      "type": "navigate",
-      "url": "http://127.0.0.1:8080/form.html"
-    }
+### 支援的後置條件清單
+- **元素狀態**：`element_exists`, `element_absent`, `element_enabled`, `element_disabled`
+- **內容比對**：`value_equals`, `text_equals`, `text_contains`
+- **頁面與導航**：`url_equals`, `url_contains`, `title_contains`, `navigation_complete`
+- **視覺與穩定度**：`ui_changed`, `ui_stable`, `page_changed`, `page_stable`（連續 3 次 100ms 靜止採樣）
 
-`computer_act` 需要目前 browser `state_id`。導航或 document replacement 會使舊
-state 失效，之後必須重新 `computer_observe`。`computer_perform` 會為一般 browser
-stale state 管理有界的 observe/resolve 週期，並在每個 action 後評估 postcondition。
+---
 
-Action 可以直接驗證結果，不使用影像辨識或 LLM：
+## 錯誤代碼與安全防護機制
 
-    {
-      "window_id": "123456",
-      "actions": [
-        {
-          "type": "click",
-          "target": { "name": "Settings", "role": "Button" },
-          "expect": {
-            "element": { "name": "Settings", "role": "Window" },
-            "ui_stable": true
-          },
-          "retry": { "max_attempts": 2, "delay_ms": 150 }
-        },
-        {
-          "type": "set_value",
-          "target": { "automation_id": "modelSelector" },
-          "value": "Gemini",
-          "expect": {
-            "value": {
-              "target": { "automation_id": "modelSelector" },
-              "equals": "Gemini"
-            }
-          }
-        }
-      ],
-      "verify": true
-    }
+執行環境嚴格遵循 Fail-Closed 原則，保障自動化過程安全可控：
 
-對 managed browser 也可以用相同 workflow 驗證 navigation 與 semantic page state，
-不需要影像比對：
+| 錯誤代碼 | 觸發原因 | 處理與恢復策略 |
+| :--- | :--- | :--- |
+| `AMBIGUOUS_TARGET` | 語意 Selector 匹配到多個評分相同的目標候選 | **拒絕執行**。回傳候選清單與分數，要求呼叫方進一步明確指定 Selector。 |
+| `STALE_BROWSER_STATE` | 頁面跳轉或 DOM 替換導致原本的節點句柄失效 | 在 `computer_act` 中立即拋錯；在 `computer_perform` 中自動觸發重新觀察與解析。 |
+| `POSTCONDITION_FAILED` | 行動執行後，後置條件在重試次數耗盡前仍未滿足 | 終止後續行動，回傳詳細的 `execution_trace`、耗盡判定與前後雜湊比對。 |
+| `TARGET_ELEVATED` | 目標視窗屬於高權限（以管理員身分執行）程序 | **拒絕執行**。執行環境絕不自行提升權限（UAC Bypass），保障系統安全。 |
+| `UNSUPPORTED_URL_SCHEME`| 試圖導航至危險協定（如 `javascript:`） | **立即攔截**。受管瀏覽器僅接受 `http:`, `https:`, `about:blank`。 |
 
-    {
-      "window_id": "browser-window-id",
-      "actions": [
-        {
-          "type": "click",
-          "target": { "test_id": "submit-button" },
-          "expect": {
-            "url_contains": "/success",
-            "title_contains": "Success",
-            "element_exists": { "role": "heading", "name": "Success" },
-            "text_contains": {
-              "target": { "role": "heading", "name": "Success" },
-              "contains": "uccess"
-            },
-            "page_changed": true,
-            "page_stable": true,
-            "navigation_complete": true
-          },
-          "retry": { "max_attempts": 2, "delay_ms": 150 }
-        }
-      ],
-      "verify": true
-    }
+---
 
-Retry 有界且 fail closed。computer_perform 內部會重新 observe、重新 resolve stale
-state；computer_act 維持明確的 state-bound 行為。歧義目標絕不直接取第一個候選，
-TARGET_ELEVATED 絕不 retry。Browser CDP timeout 對具 idempotent 性質的 set_value
-與 navigate 可以 retry；若非 idempotent 輸入的 command 可能已送出，就不會盲目重做。
-無效 action、不支援的 URL scheme 與拒絕 attach unmanaged browser 都會立即失敗。
+## 座標空間抽象
 
-支援的 postcondition key 是 element、element_absent、element_enabled、
-element_exists、element_disabled、value、value_equals、text、text_equals、
-text_contains、window_title_contains、title_contains、url_equals、url_contains、
-ui_changed、ui_stable、page_changed、page_stable 與 navigation_complete。
-execution_trace 刻意保持精簡，不會在每個 attempt 重複整棵 UI tree。
+| 座標空間 | 說明 | 適用情境 |
+| :--- | :--- | :--- |
+| `screen` | 螢幕絕對像素座標 | 系統層級點擊、向下相容既有 `x`/`y` 呼叫 |
+| `window` | 相對於觀察視窗左上角的像素座標 | 配合視窗內部元素互動 |
+| `normalized` | 視窗長寬 0.0 ~ 1.0 的相對比例 | 跨不同解析度螢幕自適應點擊（如視窗中心 `(0.5, 0.5)`） |
 
-## v0.4.0 限制與邊界
+---
 
-Windows Graphics Capture 是 best-effort：在不支援的 Windows/graphics 環境、受保護
-surface、最小化視窗、遠端工作階段或部分 GPU 應用程式上可能無法使用；回應會暴露
-失敗原因與 fallback 路徑。WGC 實作使用 Windows SDK Direct3D 11 interop，目前以同步
-方式讀回 BGRA8 frame。
+## 授權條款 (License)
 
-Browser 目前只正式支援 managed Google Chrome 與 Microsoft Edge，以及上述 semantic
-actions 與 deterministic postcondition。多分頁 lifecycle、iframe/OOPIF routing、
-popup 管理、shadow-DOM、downloads/uploads、cookies/authentication 與完整 lifecycle
-tracking 留待後續 milestone。若 CDP screenshot 失敗且存在 managed window，browser
-observation 才會 fallback 到既有 desktop capture chain；semantic browser action
-絕不會 fallback 成猜測座標。Phase 3 Host acceptance 是獨立 gate，native tests 或
-smoke script 不代表已通過；除非實際存在安全的 elevated GUI fixture，否則
-`TARGET_ELEVATED` host acceptance 仍保持未驗證。
-
-這個 Phase 3 不加入 OCR、policy engine、新 MCP tools、LLM planning、Playwright、任意
-CDP/JavaScript、cookie/storage 存取，也不支援 macOS/Linux。
-
-WGC API 流程依循 Microsoft 的
-[Windows Graphics Capture 文件](https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture)、
-[CreateForWindow interop 合約](https://learn.microsoft.com/en-us/windows/win32/api/windows.graphics.capture.interop/nf-windows-graphics-capture-interop-igraphicscaptureiteminterop-createforwindow)
-與
-[CreateDirect3D11DeviceFromDXGIDevice bridge](https://learn.microsoft.com/en-us/windows/win32/api/windows.graphics.directx.direct3d11.interop/nf-windows-graphics-directx-direct3d11-interop-createdirect3d11devicefromdxgidevice)。
+本專案採用 [MIT License](LICENSE) 授權。
